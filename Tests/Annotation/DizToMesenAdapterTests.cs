@@ -122,6 +122,39 @@ public class DizToMesenAdapterTests
     }
 
     [Fact]
+    public void ToCdl_OpcodeWithXFlag_SetsIndexMode8()
+    {
+        var bytes  = new[] { new ByteAnnotation { Type = ByteType.Opcode, XFlag = true } };
+        var result = DizToMesenAdapter.ToCdlFileBytes(MakeStore(bytes: bytes));
+        Assert.Equal(0x01 | 0x10, result[9]); // Code | IndexMode8
+    }
+
+    [Fact]
+    public void ToCdl_OpcodeWithMFlag_SetsMemoryMode8()
+    {
+        var bytes  = new[] { new ByteAnnotation { Type = ByteType.Opcode, MFlag = true } };
+        var result = DizToMesenAdapter.ToCdlFileBytes(MakeStore(bytes: bytes));
+        Assert.Equal(0x01 | 0x20, result[9]); // Code | MemoryMode8
+    }
+
+    [Fact]
+    public void ToCdl_OpcodeWithBothFlags_SetsBothModes()
+    {
+        var bytes  = new[] { new ByteAnnotation { Type = ByteType.Opcode, MFlag = true, XFlag = true } };
+        var result = DizToMesenAdapter.ToCdlFileBytes(MakeStore(bytes: bytes));
+        Assert.Equal(0x01 | 0x10 | 0x20, result[9]); // Code | IndexMode8 | MemoryMode8
+    }
+
+    [Fact]
+    public void ToCdl_DataByteWithMFlag_DoesNotSetModeFlags()
+    {
+        // M/X flags are only meaningful for code — data bytes must not carry them.
+        var bytes  = new[] { new ByteAnnotation { Type = ByteType.Data8, MFlag = true, XFlag = true } };
+        var result = DizToMesenAdapter.ToCdlFileBytes(MakeStore(bytes: bytes));
+        Assert.Equal(0x02, result[9]); // Data only, no mode flags
+    }
+
+    [Fact]
     public void ToCdl_Unreached_IsCdlNone()
     {
         var bytes  = new[] { new ByteAnnotation { Type = ByteType.Unreached } };

@@ -20,11 +20,13 @@ public static class DizToMesenAdapter
 {
     // ── CDL ───────────────────────────────────────────────────────────────────
 
-    // Mesen CdlFlags values (mirrors DebugTypes.h CdlFlags namespace).
+    // Mesen CdlFlags values (mirrors DebugApi.cs CdlFlags enum and DebugTypes.h).
     private const byte CdlNone         = 0x00;
     private const byte CdlCode         = 0x01;
     private const byte CdlData         = 0x02;
     private const byte CdlSubEntry     = 0x08;
+    private const byte CdlIndexMode8   = 0x10;  // XFlag — index registers are 8-bit
+    private const byte CdlMemoryMode8  = 0x20;  // MFlag — accumulator is 8-bit
 
     private static readonly byte[] CdlMagic = "CDLv2"u8.ToArray();
     private const int CdlHeaderSize = 9; // 5 magic + 4 CRC32
@@ -63,7 +65,7 @@ public static class DizToMesenAdapter
 
     private static byte ToCdlByte(ByteAnnotation a)
     {
-        return a.Type switch
+        byte flags = a.Type switch
         {
             ByteType.Opcode  => (a.Flow & InOutPoint.InPoint) != 0
                                     ? (byte)(CdlCode | CdlSubEntry)
@@ -78,6 +80,16 @@ public static class DizToMesenAdapter
 
             _ => CdlNone,   // Unreached
         };
+
+        // M/X flags are only meaningful for code bytes (Mesen reads them on
+        // code bytes to know the CPU mode at each instruction).
+        if ((flags & CdlCode) != 0)
+        {
+            if (a.XFlag) flags |= CdlIndexMode8;
+            if (a.MFlag) flags |= CdlMemoryMode8;
+        }
+
+        return flags;
     }
 
     // ── MLB ───────────────────────────────────────────────────────────────────
