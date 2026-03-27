@@ -194,4 +194,81 @@ public static class DizToMesenAdapter
 
     private static string EscapeComment(string comment) =>
         comment.Replace("\r\n", "\\n").Replace("\n", "\\n").Replace("\r", "\\n");
+
+    // ── CDL → RomAnnotationStore ──────────────────────────────────────────────
+
+    // CDL flag byte constants (mirrors Mesen's CdlFlags enum).
+    private const byte CdlFlagCode        = 0x01;
+    private const byte CdlFlagData        = 0x02;
+    private const byte CdlFlagSubEntry    = 0x08;
+    private const byte CdlFlagIndexMode8  = 0x10;  // XFlag
+    private const byte CdlFlagMemoryMode8 = 0x20;  // MFlag
+
+    /// <summary>
+    /// Merge Mesen CDL flag bytes into an existing <see cref="RomAnnotationStore"/>,
+    /// returning a new store with updated annotations.
+    ///
+    /// Merge rules (additive — existing data is never downgraded):
+    /// <list type="bullet">
+    ///   <item>A byte previously <see cref="ByteType.Unreached"/> is promoted to
+    ///         <see cref="ByteType.Opcode"/> (Code) or <see cref="ByteType.Data8"/>
+    ///         (Data) based on the CDL flag.</item>
+    ///   <item>M/X flags are OR-ed in — once set they are never cleared.</item>
+    ///   <item><see cref="InOutPoint.InPoint"/> is OR-ed in when CDL reports
+    ///         <c>SubEntryPoint</c>.</item>
+    ///   <item>CDL bytes beyond the length of <see cref="RomAnnotationStore.Bytes"/>
+    ///         are ignored.</item>
+    /// </list>
+    /// </summary>
+    /// <param name="store">Existing annotation store to merge into.</param>
+    /// <param name="cdlData">Raw CDL flag bytes from <c>DebugApi.SetCdlData</c>
+    ///     (no file header — one byte per ROM byte).</param>
+    public static RomAnnotationStore MergeFromCdlData(RomAnnotationStore store, byte[] cdlData)
+    {
+        var src   = store.Bytes;
+        var count = Math.Min(src.Length, cdlData.Length);
+        var dest  = new ByteAnnotation[src.Length];
+        Array.Copy(src, dest, src.Length);
+
+        for (var i = 0; i < count; i++)
+        {
+            byte cdl = cdlData[i];
+            if (cdl == CdlNone) continue;
+
+            var a = dest[i];
+
+            // Promote Unreached bytes based on CDL code/data flag.
+            if (a.Type == ByteType.Unreached)
+            {
+                if      ((cdl & CdlFlagCode) != 0) a = a with { Type = ByteType.Opcode };
+                else if ((cdl & CdlFlagData) != 0) a = a with { Type = ByteType.Data8  };
+            }
+
+            // OR in M/X flags for code bytes.
+            if ((cdl & CdlFlagCode) != 0)
+            {
+                if ((cdl & CdlFlagIndexMode8)  != 0) a = a with { XFlag = true };
+                if ((cdl & CdlFlagMemoryMode8) != 0) a = a with { MFlag = true };
+            }
+
+            // OR in SubEntryPoint → InPoint.
+            if ((cdl & CdlFlagSubEntry) != 0)
+                a = a with { Flow = a.Flow | InOutPoint.InPoint };
+
+            dest[i] = a;
+        }
+
+        return new RomAnnotationStore
+        {
+            RomGameName   = store.RomGameName,
+            RomChecksum   = store.RomChecksum,
+            MapMode       = store.MapMode,
+            Speed         = store.Speed,
+            SaveVersion   = store.SaveVersion,
+            Bytes         = dest,
+            Labels        = store.Labels,
+            LabelComments = store.LabelComments,
+            Comments      = store.Comments,
+        };
+    }
 }

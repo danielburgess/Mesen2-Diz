@@ -837,6 +837,17 @@ namespace Mesen.Debugger.ViewModels
 							}
 						}
 					},
+					new ContextMenuAction() {
+						ActionType = ActionType.ExportDizProject,
+						IsEnabled = () => DebugApi.GetMemorySize(MemoryType.SnesPrgRom) > 0,
+						OnClick = async () => {
+							string initFilename = EmuApi.GetRomInfo().GetRomName() + "." + FileDialogHelper.DizRawExt;
+							string? filename = await FileDialogHelper.SaveFile(null, initFilename, wnd, FileDialogHelper.DizRawExt, FileDialogHelper.DizExt);
+							if(filename != null) {
+								Diz.DizWorkspaceLoader.ExportFile(filename);
+							}
+						}
+					},
 
 					new ContextMenuSeparator(),
 

@@ -200,6 +200,98 @@ public class DizToMesenAdapterTests
     }
 
     // ══════════════════════════════════════════════════════════════════════════
+    // MergeFromCdlData
+    // ══════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Merge_UnreachedWithCodeFlag_BecomesOpcode()
+    {
+        var store  = MakeStore(bytes: [new ByteAnnotation { Type = ByteType.Unreached }]);
+        var result = DizToMesenAdapter.MergeFromCdlData(store, [0x01]); // Code
+        Assert.Equal(ByteType.Opcode, result.Bytes[0].Type);
+    }
+
+    [Fact]
+    public void Merge_UnreachedWithDataFlag_BecomesData8()
+    {
+        var store  = MakeStore(bytes: [new ByteAnnotation { Type = ByteType.Unreached }]);
+        var result = DizToMesenAdapter.MergeFromCdlData(store, [0x02]); // Data
+        Assert.Equal(ByteType.Data8, result.Bytes[0].Type);
+    }
+
+    [Fact]
+    public void Merge_ExistingType_IsNotDowngraded()
+    {
+        // A byte already typed as Data16 must not be overwritten by a CDL Code flag.
+        var store  = MakeStore(bytes: [new ByteAnnotation { Type = ByteType.Data16 }]);
+        var result = DizToMesenAdapter.MergeFromCdlData(store, [0x01]); // Code
+        Assert.Equal(ByteType.Data16, result.Bytes[0].Type);
+    }
+
+    [Fact]
+    public void Merge_CodeWithIndexMode8_SetsXFlag()
+    {
+        var store  = MakeStore(bytes: [new ByteAnnotation { Type = ByteType.Unreached }]);
+        var result = DizToMesenAdapter.MergeFromCdlData(store, [0x01 | 0x10]); // Code | IndexMode8
+        Assert.True(result.Bytes[0].XFlag);
+    }
+
+    [Fact]
+    public void Merge_CodeWithMemoryMode8_SetsMFlag()
+    {
+        var store  = MakeStore(bytes: [new ByteAnnotation { Type = ByteType.Unreached }]);
+        var result = DizToMesenAdapter.MergeFromCdlData(store, [0x01 | 0x20]); // Code | MemoryMode8
+        Assert.True(result.Bytes[0].MFlag);
+    }
+
+    [Fact]
+    public void Merge_SubEntry_SetsInPoint()
+    {
+        var store  = MakeStore(bytes: [new ByteAnnotation { Type = ByteType.Unreached }]);
+        var result = DizToMesenAdapter.MergeFromCdlData(store, [0x01 | 0x08]); // Code | SubEntryPoint
+        Assert.True((result.Bytes[0].Flow & InOutPoint.InPoint) != 0);
+    }
+
+    [Fact]
+    public void Merge_ExistingXFlag_IsPreservedWhenCdlHasNone()
+    {
+        var store  = MakeStore(bytes: [new ByteAnnotation { Type = ByteType.Opcode, XFlag = true }]);
+        var result = DizToMesenAdapter.MergeFromCdlData(store, [0x01]); // Code, no IndexMode8
+        Assert.True(result.Bytes[0].XFlag); // existing flag must not be cleared
+    }
+
+    [Fact]
+    public void Merge_CdlLongerThanStore_ExcessBytesIgnored()
+    {
+        var store  = MakeStore(bytes: [new ByteAnnotation { Type = ByteType.Unreached }]);
+        var cdl    = new byte[] { 0x01, 0x02, 0x02 }; // 3 CDL bytes, only 1 in store
+        var result = DizToMesenAdapter.MergeFromCdlData(store, cdl);
+        Assert.Single(result.Bytes);
+    }
+
+    [Fact]
+    public void Merge_CdlShorterThanStore_TailBytesUnchanged()
+    {
+        var store = MakeStore(bytes:
+        [
+            new ByteAnnotation { Type = ByteType.Unreached },
+            new ByteAnnotation { Type = ByteType.Unreached },
+        ]);
+        var result = DizToMesenAdapter.MergeFromCdlData(store, [0x01]); // only first byte covered
+        Assert.Equal(ByteType.Opcode,    result.Bytes[0].Type);
+        Assert.Equal(ByteType.Unreached, result.Bytes[1].Type); // tail unchanged
+    }
+
+    [Fact]
+    public void Merge_OriginalStore_IsNotMutated()
+    {
+        var orig  = new ByteAnnotation { Type = ByteType.Unreached };
+        var store = MakeStore(bytes: [orig]);
+        DizToMesenAdapter.MergeFromCdlData(store, [0x01]);
+        Assert.Equal(ByteType.Unreached, store.Bytes[0].Type); // original untouched
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
     // MLB
     // ══════════════════════════════════════════════════════════════════════════
 
