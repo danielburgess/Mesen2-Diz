@@ -42,6 +42,7 @@ namespace Mesen.Utilities
 		public const string SufamiTurboExt = "st";
 		public const string DizExt = "diz";
 		public const string DizRawExt = "dizraw";
+		public const string AsmExt = "asm";
 
 		public static async Task<string?> OpenFile(string? initialFolder, IRenderRoot? parent, params string[] extensions)
 		{

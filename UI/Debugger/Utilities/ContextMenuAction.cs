@@ -772,6 +772,8 @@ namespace Mesen.Debugger.Utilities
 		ImportDizProject,
 		[IconFile("Export")]
 		ExportDizProject,
+		[IconFile("Export")]
+		ExportAsm,
 		
 		[IconFile("Import")]
 		ImportWatchEntries,

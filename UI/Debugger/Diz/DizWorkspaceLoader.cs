@@ -1,4 +1,5 @@
 using Mesen.Annotation;
+using Mesen.Annotation.Asm;
 using Mesen.Annotation.Diz;
 using Mesen.Config;
 using Mesen.Debugger.Labels;
@@ -126,6 +127,52 @@ namespace Mesen.Debugger.Diz
 			try {
 				string xml = DizProjectExporter.Export(updated);
 				WriteDizFile(path, xml);
+			} catch(Exception ex) {
+				MesenMsgBox.Show(null, "DizExportError", MessageBoxButtons.OK, MessageBoxIcon.Error, ex.Message);
+				return;
+			}
+
+			MesenMsgBox.Show(null, "DizExportSuccess", MessageBoxButtons.OK, MessageBoxIcon.Info,
+				Path.GetFileName(path));
+		}
+
+		// ── ASM export ────────────────────────────────────────────────────────
+
+		/// <summary>
+		/// Merge live CDL data into the current store (or build one from scratch),
+		/// disassemble the ROM, and write Asar-compatible .asm text to
+		/// <paramref name="path"/>.
+		/// </summary>
+		public static void ExportAsmFile(string path)
+		{
+			MemoryType memType  = MemoryType.SnesPrgRom;
+			int        liveSize = DebugApi.GetMemorySize(memType);
+
+			RomAnnotationStore? base_ = CurrentStore;
+			if(base_ == null) {
+				base_ = BuildStoreFromMesen(memType, liveSize);
+				if(base_ == null) {
+					MesenMsgBox.Show(null, "DizExportNoRom", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+					return;
+				}
+			}
+
+			RomAnnotationStore updated = base_;
+			if(liveSize > 0) {
+				CdlFlags[] cdlFlags = DebugApi.GetCdlData(0, (uint)liveSize, memType);
+				byte[]     cdlBytes = new byte[cdlFlags.Length];
+				for(int i = 0; i < cdlFlags.Length; i++)
+					cdlBytes[i] = (byte)cdlFlags[i];
+				updated = DizToMesenAdapter.MergeFromCdlData(base_, cdlBytes);
+			}
+
+			CurrentStore = updated;
+
+			byte[] romBytes = DebugApi.GetMemoryState(memType);
+
+			try {
+				string asm = SnesAsmExporter.Export(updated, romBytes);
+				File.WriteAllText(path, asm, System.Text.Encoding.UTF8);
 			} catch(Exception ex) {
 				MesenMsgBox.Show(null, "DizExportError", MessageBoxButtons.OK, MessageBoxIcon.Error, ex.Message);
 				return;

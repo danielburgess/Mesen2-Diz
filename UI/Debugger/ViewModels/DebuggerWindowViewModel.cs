@@ -819,6 +819,21 @@ namespace Mesen.Debugger.ViewModels
 							}
 						}
 					},
+					new ContextMenuSeparator() {
+						IsVisible = () => DebugApi.GetMemorySize(MemoryType.SnesPrgRom) > 0
+					},
+					new ContextMenuAction() {
+						ActionType = ActionType.ExportAsm,
+						IsVisible = () => DebugApi.GetMemorySize(MemoryType.SnesPrgRom) > 0,
+						IsEnabled = () => DebugApi.GetMemorySize(MemoryType.SnesPrgRom) > 0,
+						OnClick = async () => {
+							string initFilename = EmuApi.GetRomInfo().GetRomName() + "." + FileDialogHelper.AsmExt;
+							string? filename = await FileDialogHelper.SaveFile(null, initFilename, wnd, FileDialogHelper.AsmExt);
+							if(filename != null) {
+								Diz.DizWorkspaceLoader.ExportAsmFile(filename);
+							}
+						}
+					},
 				}
 			};
 		}
@@ -830,6 +845,7 @@ namespace Mesen.Debugger.ViewModels
 				SubActions = new() {
 					new ContextMenuAction() {
 						ActionType = ActionType.ImportDizProject,
+						IsVisible = () => DebugApi.GetMemorySize(MemoryType.SnesPrgRom) > 0,
 						OnClick = async () => {
 							string? filename = await FileDialogHelper.OpenFile(null, wnd, FileDialogHelper.DizExt, FileDialogHelper.DizRawExt);
 							if(filename != null) {
@@ -839,6 +855,7 @@ namespace Mesen.Debugger.ViewModels
 					},
 					new ContextMenuAction() {
 						ActionType = ActionType.ExportDizProject,
+						IsVisible = () => DebugApi.GetMemorySize(MemoryType.SnesPrgRom) > 0,
 						IsEnabled = () => DebugApi.GetMemorySize(MemoryType.SnesPrgRom) > 0,
 						OnClick = async () => {
 							string initFilename = EmuApi.GetRomInfo().GetRomName() + "." + FileDialogHelper.DizRawExt;
@@ -849,7 +866,9 @@ namespace Mesen.Debugger.ViewModels
 						}
 					},
 
-					new ContextMenuSeparator(),
+					new ContextMenuSeparator() {
+						IsVisible = () => DebugApi.GetMemorySize(MemoryType.SnesPrgRom) > 0
+					},
 
 					new ContextMenuAction() {
 						ActionType = ActionType.ImportLabels,
