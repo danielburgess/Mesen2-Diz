@@ -1,6 +1,7 @@
 ﻿using Avalonia.Controls;
 using Avalonia.Threading;
 using Mesen.Config;
+using Mesen.Debugger.Diz;
 using Mesen.Config.Shortcuts;
 using Mesen.Controls;
 using Mesen.Debugger.Utilities;
@@ -1007,6 +1008,10 @@ namespace Mesen.ViewModels
 					Shortcut = () => ConfigManager.Config.Debug.Shortcuts.Get(DebuggerShortcut.OpenPaletteViewer),
 					IsEnabled = () => IsGameRunning,
 					OnClick = () => DebugWindowManager.OpenDebugWindow(() => new PaletteViewerWindow(MainWindow.RomInfo.ConsoleType.GetMainCpuType()))
+				},
+				new ContextMenuAction() {
+					ActionType = ActionType.OpenRomMapViewer,
+					OnClick = () => DebugWindowManager.GetOrOpenDebugWindow(() => new RomMapWindow(false))
 				},
 				new ContextMenuSeparator(),
 				new ContextMenuAction() {

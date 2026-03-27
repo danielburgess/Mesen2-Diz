@@ -542,6 +542,9 @@ namespace Mesen.Debugger.Utilities
 		[IconFile("VideoFilter")]
 		OpenPaletteViewer,
 
+		[IconFile("VerticalLayout")]
+		OpenRomMapViewer,
+
 		[IconFile("Chip")]
 		OpenAssembler,
 		

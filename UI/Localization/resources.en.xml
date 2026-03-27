@@ -1106,6 +1106,16 @@
 			<Control ID="lblSelectedColor">Selected Color</Control>
 		</Form>
 
+		<Form ID="RomMapWindow">
+			<Control ID="wndTitle">ROM Map</Control>
+			<Control ID="mnuFile">_File</Control>
+			<Control ID="mnuView">_View</Control>
+			<Control ID="btnToggleSettings">Toggle settings panel</Control>
+			<Control ID="lblCanvasWidth">Width (px)</Control>
+			<Control ID="btnFitToWidth">Fit to window</Control>
+			<Control ID="lblLegend">Legend</Control>
+		</Form>
+
 		<Form ID="ColorIndexPickerWindow">
 			<Control ID="wndTitle">Select color...</Control>
 			<Control ID="btnCancel">Cancel</Control>
@@ -3233,6 +3243,7 @@ E
 			<Value ID="OpenTileViewer">Open Tile Viewer</Value>
 			<Value ID="OpenSpriteViewer">Open Sprite Viewer</Value>
 			<Value ID="OpenPaletteViewer">Open Palette Viewer</Value>
+			<Value ID="OpenRomMapViewer">Open ROM Map</Value>
 			<Value ID="Reset">Reset</Value>
 			<Value ID="PowerCycle">Power cycle</Value>
 			<Value ID="ReloadRom">Reload ROM</Value>
@@ -3516,6 +3527,7 @@ E
 			<Value ID="OpenTileViewer">Tile Viewer</Value>
 			<Value ID="OpenSpriteViewer">Sprite Viewer</Value>
 			<Value ID="OpenPaletteViewer">Palette Viewer</Value>
+			<Value ID="OpenRomMapViewer">ROM Map</Value>
 			<Value ID="OpenDebugSettings">Settings</Value>
 
 			<Value ID="Tools">Tools</Value>

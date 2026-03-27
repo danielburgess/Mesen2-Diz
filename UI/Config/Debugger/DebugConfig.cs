@@ -32,6 +32,7 @@ namespace Mesen.Config
 		public WatchWindowConfig WatchWindow { get; set; } = new();
 		public AssemblerConfig Assembler { get; set; } = new();
 		public DebugLogConfig DebugLog { get; set; } = new();
+		public RomMapViewerConfig RomMapViewer { get; set; } = new();
 		public DebuggerFontConfig Fonts { get; set; } = new();
 
 		public DebugConfig()

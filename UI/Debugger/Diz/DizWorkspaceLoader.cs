@@ -30,6 +30,18 @@ namespace Mesen.Debugger.Diz
 		/// <summary>The most recently imported store, or <c>null</c> if none.</summary>
 		public static RomAnnotationStore? CurrentStore { get; private set; }
 
+		/// <summary>
+		/// Returns <see cref="CurrentStore"/> if one exists, otherwise builds a
+		/// temporary store from the currently running ROM's CDL data.
+		/// Returns <c>null</c> if no ROM is loaded.
+		/// </summary>
+		public static RomAnnotationStore? GetOrBuildStore()
+		{
+			if(CurrentStore != null) return CurrentStore;
+			int liveSize = DebugApi.GetMemorySize(MemoryType.SnesPrgRom);
+			return liveSize > 0 ? BuildStoreFromMesen(MemoryType.SnesPrgRom, liveSize) : null;
+		}
+
 		// ── Import ────────────────────────────────────────────────────────────
 
 		public static void LoadFile(string path, bool showResult)

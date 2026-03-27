@@ -1,0 +1,82 @@
+<Window
+	xmlns="https://github.com/avaloniaui"
+	xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+	xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+	xmlns:c="using:Mesen.Controls"
+	xmlns:l="using:Mesen.Localization"
+	xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+	xmlns:dvm="using:Mesen.Debugger.ViewModels"
+	xmlns:dc="using:Mesen.Debugger.Controls"
+	mc:Ignorable="d" d:DesignWidth="600" d:DesignHeight="600"
+	x:Class="Mesen.Debugger.Windows.RomMapWindow"
+	x:DataType="dvm:RomMapViewModel"
+	Width="700" Height="600"
+	Title="{l:Translate wndTitle}"
+	Icon="/Assets/VerticalLayout.png"
+>
+	<DockPanel>
+		<Panel DockPanel.Dock="Top">
+			<c:MesenMenu Name="ActionMenu">
+				<MenuItem Header="{l:Translate mnuFile}" ItemsSource="{Binding FileMenuActions}" />
+				<MenuItem Header="{l:Translate mnuView}" ItemsSource="{Binding ViewMenuActions}" />
+			</c:MesenMenu>
+			<c:IconButton
+				HorizontalAlignment="Right"
+				ToolTip.Tip="{l:Translate btnToggleSettings}"
+				Click="OnSettingsClick"
+				Icon="Assets/Settings.png"
+			/>
+		</Panel>
+
+		<!-- Status bar -->
+		<Border DockPanel.Dock="Bottom" BorderThickness="0,1,0,0" BorderBrush="{StaticResource MesenBorderColor}" Padding="4,2">
+			<TextBlock Text="{Binding HoverInfo}" FontSize="12" />
+		</Border>
+
+		<!-- Settings panel -->
+		<Border
+			DockPanel.Dock="Right"
+			IsVisible="{Binding Config.ShowSettingsPanel}"
+			BorderThickness="1,0,0,0"
+			BorderBrush="{StaticResource MesenBorderColor}"
+			Padding="6"
+			MinWidth="140"
+		>
+			<StackPanel Spacing="8">
+				<StackPanel Spacing="4">
+					<TextBlock Text="{l:Translate lblCanvasWidth}" FontWeight="Bold" />
+					<NumericUpDown
+						Value="{Binding Config.CanvasWidth}"
+						Minimum="16" Maximum="4096" Increment="16"
+						FormatString="0"
+					/>
+					<Button Content="{l:Translate btnFitToWidth}" Click="OnFitToWidthClick" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+				</StackPanel>
+
+				<StackPanel Spacing="4">
+					<TextBlock Text="{l:Translate lblLegend}" FontWeight="Bold" />
+					<ItemsControl ItemsSource="{Binding LegendEntries}">
+						<ItemsControl.ItemTemplate>
+							<DataTemplate x:DataType="dvm:LegendEntry">
+								<StackPanel Orientation="Horizontal" Spacing="5" Margin="0,1">
+									<Border
+										Width="14" Height="14"
+										CornerRadius="2"
+										Background="{Binding Brush}"
+									/>
+									<TextBlock Text="{Binding Label}" VerticalAlignment="Center" FontSize="11" />
+								</StackPanel>
+							</DataTemplate>
+						</ItemsControl.ItemTemplate>
+					</ItemsControl>
+				</StackPanel>
+			</StackPanel>
+		</Border>
+
+		<dc:ScrollPictureViewer
+			x:Name="picViewer"
+			Source="{Binding ViewerBitmap}"
+			Zoom="{Binding Config.ImageScale}"
+		/>
+	</DockPanel>
+</Window>
