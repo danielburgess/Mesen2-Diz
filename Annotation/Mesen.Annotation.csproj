@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Mesen.Annotation</RootNamespace>
+    <AssemblyName>Mesen.Annotation</AssemblyName>
+  </PropertyGroup>
+
+</Project>
