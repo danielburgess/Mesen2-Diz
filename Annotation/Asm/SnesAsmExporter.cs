@@ -16,6 +16,9 @@ namespace Mesen.Annotation.Asm;
 ///
 /// Branch and jump targets that have a label in the store are shown by name
 /// rather than hex address.
+///
+/// Labels at non-ROM addresses (WRAM, hardware registers) are emitted as
+/// NAME = $SNESADDR assignments at the end of the file.
 /// </summary>
 public static class SnesAsmExporter
 {
@@ -40,14 +43,24 @@ public static class SnesAsmExporter
                 $"store.Bytes length {store.Bytes.Length}.",
                 nameof(romBytes));
 
+        int        romLen = romBytes.Length;
+        RomMapMode map    = store.MapMode;
+
+        // Build ROM-offset-keyed dicts so that labels stored at upper-bank SNES
+        // addresses ($808000 for LoRom) resolve correctly against lower-bank
+        // canonical addresses ($008000) returned by TryToSnesAddress.
+        var labelsByOffset        = BuildOffsetDict(store.Labels,        map);
+        var commentsByOffset      = BuildOffsetDict(store.Comments,      map);
+        var labelCommentsByOffset = BuildOffsetDict(store.LabelComments, map);
+
         var sb = new StringBuilder(romBytes.Length * 6);
         EmitFileHeader(sb, store);
 
-        int i = 0;
+        int i            = 0;
         int prevSnesAddr = -1;
         int prevSize     = 0;
 
-        while (i < romBytes.Length)
+        while (i < romLen)
         {
             var ann = store.Bytes[i];
 
@@ -60,8 +73,7 @@ public static class SnesAsmExporter
                 continue;
             }
 
-            if (!SnesAddressConverter.TryToSnesAddress(
-                    i, romBytes.Length, store.MapMode, out int snesAddr))
+            if (!SnesAddressConverter.TryToSnesAddress(i, romLen, map, out int snesAddr))
             {
                 i++;
                 continue;
@@ -72,33 +84,38 @@ public static class SnesAsmExporter
             if (needsOrg)
             {
                 if (prevSnesAddr >= 0) sb.AppendLine();
-                sb.AppendLine($"        org ${snesAddr:X6}");
+                sb.AppendLine($"        org ${AsmSnesAddr(snesAddr, map):X6}");
                 sb.AppendLine();
             }
 
             // Block comment attached to the label at this address.
-            if (store.LabelComments.TryGetValue(snesAddr, out var block) && block.Length > 0)
+            if (labelCommentsByOffset.TryGetValue(i, out var block) && block.Length > 0)
             {
                 foreach (var line in block.Split('\n'))
                     sb.AppendLine($"; {line.TrimEnd('\r')}");
             }
 
             // Label itself.
-            if (store.Labels.TryGetValue(snesAddr, out var label) && label.Length > 0)
+            if (labelsByOffset.TryGetValue(i, out var label) && label.Length > 0)
                 sb.AppendLine($"{label}:");
 
-            store.Comments.TryGetValue(snesAddr, out var inlineComment);
+            commentsByOffset.TryGetValue(i, out var inlineComment);
 
             int size;
             if (ann.Type == ByteType.Opcode)
-                size = EmitInstruction(sb, store, romBytes, i, snesAddr, ann, inlineComment);
+                size = EmitInstruction(sb, romBytes, i, snesAddr, ann, inlineComment,
+                                       labelsByOffset, map);
             else
-                size = EmitDataGroup(sb, store, romBytes, i, snesAddr, ann.Type, inlineComment);
+                size = EmitDataGroup(sb, store, romBytes, i, ann.Type, inlineComment,
+                                     labelsByOffset, commentsByOffset, labelCommentsByOffset,
+                                     romLen, map);
 
             prevSnesAddr = snesAddr;
             prevSize     = size;
             i           += size;
         }
+
+        EmitNonRomLabels(sb, store, labelsByOffset);
 
         return sb.ToString();
     }
@@ -112,18 +129,21 @@ public static class SnesAsmExporter
         sb.AppendLine($"; Checksum: ${store.RomChecksum:X8}");
         sb.AppendLine($"; Exported by Mesen2-Diz");
         sb.AppendLine();
+        sb.AppendLine(MapModeDirective(store.MapMode));
+        sb.AppendLine();
     }
 
     // ── Code instruction emit ─────────────────────────────────────────────────
 
     private static int EmitInstruction(
         StringBuilder sb,
-        RomAnnotationStore store,
         byte[] romBytes,
         int romOff,
         int snesAddr,
         ByteAnnotation ann,
-        string? comment)
+        string? comment,
+        Dictionary<int, string> labelsByOffset,
+        RomMapMode map)
     {
         byte opcode = romBytes[romOff];
         var info    = Table[opcode];
@@ -134,10 +154,13 @@ public static class SnesAsmExporter
         for (int k = 0; k < numOps && romOff + 1 + k < romBytes.Length; k++)
             ops[k] = romBytes[romOff + 1 + k];
 
-        string operand = FormatOperand(info.Mode, ops, opcode, snesAddr, ann, store);
+        string operand = FormatOperand(info.Mode, ops, opcode, snesAddr, ann,
+                                       labelsByOffset, map);
+        string suffix  = MnemonicSuffix(info.Mode, ann.MFlag, ann.XFlag);
 
         var line = new StringBuilder("        ");
         line.Append(info.Mnemonic);
+        line.Append(suffix);
         if (operand.Length > 0) { line.Append(' '); line.Append(operand); }
         AppendComment(line, comment);
 
@@ -152,14 +175,17 @@ public static class SnesAsmExporter
         RomAnnotationStore store,
         byte[] romBytes,
         int startRom,
-        int startSnes,
         ByteType type,
-        string? firstComment)
+        string? firstComment,
+        Dictionary<int, string> labelsByOffset,
+        Dictionary<int, string> commentsByOffset,
+        Dictionary<int, string> labelCommentsByOffset,
+        int romLen,
+        RomMapMode map)
     {
         int elemBytes = ElemBytes(type);
         string dir    = elemBytes switch { 2 => "dw", 3 => "dl", 4 => "dd", _ => "db" };
 
-        int romLen = romBytes.Length;
         int i      = startRom;
         var elems  = new List<string>(DataLineMaxBytes / elemBytes + 1);
         string? pendingComment = firstComment;
@@ -168,16 +194,15 @@ public static class SnesAsmExporter
         {
             if (store.Bytes[i].Type != type) break;
 
-            if (!SnesAddressConverter.TryToSnesAddress(
-                    i, romLen, store.MapMode, out int addr)) break;
+            if (!SnesAddressConverter.TryToSnesAddress(i, romLen, map, out _)) break;
 
             // A label, label-comment, or inline comment at a non-first byte
             // ends the group so annotations can be re-emitted on the new line.
             if (i != startRom)
             {
-                if (store.Labels.ContainsKey(addr))       break;
-                if (store.Comments.ContainsKey(addr))     break;
-                if (store.LabelComments.ContainsKey(addr)) break;
+                if (labelsByOffset.ContainsKey(i))        break;
+                if (commentsByOffset.ContainsKey(i))      break;
+                if (labelCommentsByOffset.ContainsKey(i)) break;
             }
 
             if (i + elemBytes > romLen) break;
@@ -221,6 +246,105 @@ public static class SnesAsmExporter
         sb.AppendLine(line.ToString());
     }
 
+    // ── Non-ROM label assignments ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Emit NAME = $SNESADDR lines for all labels whose SNES address does not
+    /// map to any ROM offset (hardware registers, WRAM variables, etc.).
+    /// </summary>
+    private static void EmitNonRomLabels(
+        StringBuilder sb,
+        RomAnnotationStore store,
+        Dictionary<int, string> labelsByOffset)
+    {
+        var nonRom = new List<(string name, int addr)>();
+        foreach (var (snesAddr, name) in store.Labels)
+        {
+            if (name.Length == 0) continue;
+            if (!SnesAddressConverter.TryToRomOffset(snesAddr, store.MapMode, out _))
+                nonRom.Add((name, snesAddr));
+        }
+
+        if (nonRom.Count == 0) return;
+
+        nonRom.Sort((a, b) => a.addr.CompareTo(b.addr));
+        sb.AppendLine();
+        foreach (var (name, addr) in nonRom)
+            sb.AppendLine($"{name} = ${addr:X6}");
+    }
+
+    // ── Address helpers ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Convert a canonical SNES address to the Asar/DiztinGUIsh upper-bank
+    /// convention: addresses below $800000 have bit 23 set (bank ≥ $80).
+    /// ExHiRom addresses are already in the $C0+ range and are returned as-is.
+    /// </summary>
+    private static int AsmSnesAddr(int snesAddr, RomMapMode mode)
+    {
+        if (mode == RomMapMode.ExHiRom) return snesAddr;
+        return snesAddr < 0x800000 ? snesAddr | 0x800000 : snesAddr;
+    }
+
+    private static string MapModeDirective(RomMapMode mode) => mode switch
+    {
+        RomMapMode.HiRom   => "hirom",
+        RomMapMode.ExHiRom => "exhirom",
+        RomMapMode.ExLoRom => "exlorom",
+        RomMapMode.Sa1Rom  => "sa1rom",
+        _                  => "lorom",
+    };
+
+    // ── Mnemonic suffix ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Return the Asar mnemonic suffix (.B/.W/.L) for the given addressing mode.
+    /// Follows DiztinGUIsh: suffix = operand byte count (1→.B, 2→.W, 3→.L),
+    /// except Constant8 (Imm8), branch offsets (Rel8/Rel16), block-move (Blk),
+    /// implied (Imp), and accumulator (Acc) get no suffix.
+    /// </summary>
+    private static string MnemonicSuffix(AddrMode mode, bool m, bool x) => mode switch
+    {
+        AddrMode.Imp or AddrMode.Acc                                      => "",
+        AddrMode.Imm8 or AddrMode.Rel8 or AddrMode.Rel16 or AddrMode.Blk => "",
+        AddrMode.ImmM                                                     => m ? ".B" : ".W",
+        AddrMode.ImmX                                                     => x ? ".B" : ".W",
+        AddrMode.Dp     or AddrMode.DpX    or AddrMode.DpY    or
+            AddrMode.DpInd  or AddrMode.DpIndX or AddrMode.DpIndY or
+            AddrMode.DpIndL or AddrMode.DpIndLY or
+            AddrMode.Sr     or AddrMode.SrIndY                           => ".B",
+        AddrMode.Abs    or AddrMode.AbsX   or AddrMode.AbsY   or
+            AddrMode.AbsInd or AddrMode.AbsIndX or AddrMode.AbsIndL or
+            AddrMode.Pea                                                  => ".W",
+        AddrMode.AbsL or AddrMode.AbsLX                                  => ".L",
+        _                                                                 => "",
+    };
+
+    // ── ROM-offset dict helpers ────────────────────────────────────────────────
+
+    private static Dictionary<int, string> BuildOffsetDict(
+        IReadOnlyDictionary<int, string> byAddr,
+        RomMapMode map)
+    {
+        var dict = new Dictionary<int, string>(byAddr.Count);
+        foreach (var (snesAddr, value) in byAddr)
+        {
+            if (SnesAddressConverter.TryToRomOffset(snesAddr, map, out int offset))
+                dict.TryAdd(offset, value);
+        }
+        return dict;
+    }
+
+    private static string? TryLabelByOffset(
+        Dictionary<int, string> labelsByOffset,
+        int targetSnesAddr,
+        RomMapMode map)
+    {
+        if (!SnesAddressConverter.TryToRomOffset(targetSnesAddr, map, out int offset))
+            return null;
+        return labelsByOffset.TryGetValue(offset, out var name) && name.Length > 0 ? name : null;
+    }
+
     // ── Operand formatting ────────────────────────────────────────────────────
 
     private static string FormatOperand(
@@ -229,7 +353,8 @@ public static class SnesAsmExporter
         byte opcode,
         int snesAddr,
         ByteAnnotation ann,
-        RomAnnotationStore store)
+        Dictionary<int, string> labelsByOffset,
+        RomMapMode map)
     {
         return mode switch
         {
@@ -250,34 +375,33 @@ public static class SnesAsmExporter
             AddrMode.DpIndLY => $"[${ops[0]:X2}],Y",
             AddrMode.Sr      => $"${ops[0]:X2},S",
             AddrMode.SrIndY  => $"(${ops[0]:X2},S),Y",
-            AddrMode.PEI     => $"(${ops[0]:X2})",
 
             AddrMode.Abs =>
-                TryLabel(store, AbsTarget(ops, opcode, snesAddr, ann)) ?? $"${U16(ops):X4}",
+                TryLabelByOffset(labelsByOffset, AbsTarget(ops, opcode, snesAddr, ann), map)
+                    ?? $"${U16(ops):X4}",
             AddrMode.AbsX =>
-                TryLabel(store, (ann.DataBank << 16) | U16(ops)) is { } lx
+                TryLabelByOffset(labelsByOffset, (ann.DataBank << 16) | U16(ops), map) is { } lx
                     ? $"{lx},X" : $"${U16(ops):X4},X",
             AddrMode.AbsY =>
-                TryLabel(store, (ann.DataBank << 16) | U16(ops)) is { } ly
+                TryLabelByOffset(labelsByOffset, (ann.DataBank << 16) | U16(ops), map) is { } ly
                     ? $"{ly},Y" : $"${U16(ops):X4},Y",
             AddrMode.AbsInd  => $"(${U16(ops):X4})",
             AddrMode.AbsIndX => $"(${U16(ops):X4},X)",
             AddrMode.AbsIndL => $"[${U16(ops):X4}]",
 
             AddrMode.AbsL =>
-                TryLabel(store, U24(ops)) ?? $"${U24(ops):X6}",
+                TryLabelByOffset(labelsByOffset, U24(ops), map) ?? $"${U24(ops):X6}",
             AddrMode.AbsLX =>
-                TryLabel(store, U24(ops)) is { } ll ? $"{ll},X" : $"${U24(ops):X6},X",
+                TryLabelByOffset(labelsByOffset, U24(ops), map) is { } ll
+                    ? $"{ll},X" : $"${U24(ops):X6},X",
 
-            AddrMode.Rel8 =>
-                FormatRel8(ops[0], snesAddr, store),
-            AddrMode.Rel16 =>
-                FormatRel16(U16(ops), snesAddr, store),
+            AddrMode.Rel8  => FormatRel8(ops[0], snesAddr, labelsByOffset, map),
+            AddrMode.Rel16 => FormatRel16(U16(ops), snesAddr, labelsByOffset, map),
 
             // MVN/MVP: ROM encoding is [opcode][srcbk][dstbk]; mnemonic is src,dst.
             AddrMode.Blk => $"${ops[0]:X2},${ops[1]:X2}",
 
-            // PEA: push 2-byte literal. Format as $XXXX (no #) without label lookup.
+            // PEA: push 2-byte literal, format as $XXXX (no label lookup, no #).
             AddrMode.Pea => $"${U16(ops):X4}",
 
             _ => "",
@@ -297,20 +421,19 @@ public static class SnesAsmExporter
         return (bank << 16) | U16(ops);
     }
 
-    private static string FormatRel8(byte b, int snesAddr, RomAnnotationStore store)
+    private static string FormatRel8(byte b, int snesAddr,
+        Dictionary<int, string> labelsByOffset, RomMapMode map)
     {
         int target = (snesAddr & 0xFF0000) | ((snesAddr + 2 + (sbyte)b) & 0xFFFF);
-        return TryLabel(store, target) ?? $"${target:X6}";
+        return TryLabelByOffset(labelsByOffset, target, map) ?? $"${target:X6}";
     }
 
-    private static string FormatRel16(int w, int snesAddr, RomAnnotationStore store)
+    private static string FormatRel16(int w, int snesAddr,
+        Dictionary<int, string> labelsByOffset, RomMapMode map)
     {
         int target = (snesAddr & 0xFF0000) | ((snesAddr + 3 + (short)w) & 0xFFFF);
-        return TryLabel(store, target) ?? $"${target:X6}";
+        return TryLabelByOffset(labelsByOffset, target, map) ?? $"${target:X6}";
     }
-
-    private static string? TryLabel(RomAnnotationStore store, int snesAddr) =>
-        store.Labels.TryGetValue(snesAddr, out var n) && n.Length > 0 ? n : null;
 
     // ── Misc helpers ──────────────────────────────────────────────────────────
 
@@ -405,7 +528,9 @@ public static class SnesAsmExporter
     // ── 65816 opcode table ────────────────────────────────────────────────────
     //
     // 256 entries, indexed by opcode byte (00–FF).
-    // Numeric values of AddrMode enum must never be used as a wire format.
+    // Changes from initial version:
+    //   0xD4 PEI: AddrMode.PEI → AddrMode.DpInd  (gets .B suffix)
+    //   0xF4 PEA: AddrMode.Pea → AddrMode.Abs     (gets .W suffix, label lookup)
 
     private static readonly OpcodeInfo[] Table =
     [
@@ -476,7 +601,7 @@ public static class SnesAsmExporter
         new("CPY", AddrMode.Abs),    new("CMP", AddrMode.Abs),     new("DEC", AddrMode.Abs),     new("CMP", AddrMode.AbsL),
         // D0–DF
         new("BNE", AddrMode.Rel8),   new("CMP", AddrMode.DpIndY),  new("CMP", AddrMode.DpInd),   new("CMP", AddrMode.SrIndY),
-        new("PEI", AddrMode.PEI),    new("CMP", AddrMode.DpX),     new("DEC", AddrMode.DpX),     new("CMP", AddrMode.DpIndLY),
+        new("PEI", AddrMode.DpInd),  new("CMP", AddrMode.DpX),     new("DEC", AddrMode.DpX),     new("CMP", AddrMode.DpIndLY),
         new("CLD", AddrMode.Imp),    new("CMP", AddrMode.AbsY),    new("PHX", AddrMode.Imp),     new("STP", AddrMode.Imp),
         new("JML", AddrMode.AbsIndL),new("CMP", AddrMode.AbsX),    new("DEC", AddrMode.AbsX),    new("CMP", AddrMode.AbsLX),
         // E0–EF
@@ -486,7 +611,7 @@ public static class SnesAsmExporter
         new("CPX", AddrMode.Abs),    new("SBC", AddrMode.Abs),     new("INC", AddrMode.Abs),     new("SBC", AddrMode.AbsL),
         // F0–FF
         new("BEQ", AddrMode.Rel8),   new("SBC", AddrMode.DpIndY),  new("SBC", AddrMode.DpInd),   new("SBC", AddrMode.SrIndY),
-        new("PEA", AddrMode.Pea),    new("SBC", AddrMode.DpX),     new("INC", AddrMode.DpX),     new("SBC", AddrMode.DpIndLY),
+        new("PEA", AddrMode.Abs),    new("SBC", AddrMode.DpX),     new("INC", AddrMode.DpX),     new("SBC", AddrMode.DpIndLY),
         new("SED", AddrMode.Imp),    new("SBC", AddrMode.AbsY),    new("PLX", AddrMode.Imp),     new("XCE", AddrMode.Imp),
         new("JSR", AddrMode.AbsIndX),new("SBC", AddrMode.AbsX),    new("INC", AddrMode.AbsX),    new("SBC", AddrMode.AbsLX),
     ];

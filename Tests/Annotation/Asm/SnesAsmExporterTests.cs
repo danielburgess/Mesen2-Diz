@@ -78,21 +78,35 @@ public class SnesAsmExporterTests
         Assert.Contains("DEADBEEF", result);
     }
 
+    [Fact]
+    public void Export_Header_ContainsLoRomDirective()
+    {
+        var result = SnesAsmExporter.Export(MakeStore([]), []);
+        Assert.Contains("lorom", result);
+    }
+
+    [Fact]
+    public void Export_Header_HiRomDirective()
+    {
+        var result = SnesAsmExporter.Export(MakeStore([], map: RomMapMode.HiRom), []);
+        Assert.Contains("hirom", result);
+    }
+
     // ══════════════════════════════════════════════════════════════════════════
-    // Org directives
+    // Org directives — upper-bank convention ($80xxxx for LoRom)
     // ══════════════════════════════════════════════════════════════════════════
 
     [Fact]
     public void Export_FirstByte_EmitsOrg()
     {
         var result = SnesAsmExporter.Export(MakeStore([Op()]), [0xEA]);
-        Assert.Contains("org $008000", result);
+        Assert.Contains("org $808000", result);
     }
 
     [Fact]
     public void Export_BankBoundary_EmitsNewOrg()
     {
-        // First LoRom bank is 0x8000 bytes. Offset 0x8000 → SNES $018000.
+        // First LoRom bank is 0x8000 bytes. Offset 0x8000 → SNES $018000 → ASM $818000.
         int bankSize = 0x8000;
         var ann = new ByteAnnotation[bankSize + 1];
         for (int i = 0; i < bankSize; i++)
@@ -103,17 +117,17 @@ public class SnesAsmExporterTests
         rom[bankSize] = 0xEA;
 
         var result = SnesAsmExporter.Export(MakeStore(ann), rom);
-        Assert.Contains("org $018000", result);
+        Assert.Contains("org $818000", result);
     }
 
     [Fact]
     public void Export_Gap_EmitsSecondOrg()
     {
-        // Offset 0 → $008000, offset 1 = Unreached, offset 2 → $008002.
+        // Offset 0 → $008000 → $808000, offset 1 = Unreached, offset 2 → $008002 → $808002.
         var ann = new ByteAnnotation[] { Op(), new() { Type = ByteType.Unreached }, Op() };
         var result = SnesAsmExporter.Export(MakeStore(ann), [0xEA, 0x00, 0xEA]);
-        Assert.Contains("org $008000", result);
-        Assert.Contains("org $008002", result);
+        Assert.Contains("org $808000", result);
+        Assert.Contains("org $808002", result);
     }
 
     [Fact]
@@ -122,9 +136,12 @@ public class SnesAsmExporterTests
         var result = SnesAsmExporter.Export(
             MakeStore([new ByteAnnotation { Type = ByteType.Unreached }]), [0xFF]);
 
-        // Only header comment lines and whitespace; no org, no data.
+        // Only header comment lines, the map-mode directive, and whitespace; no org, no data.
         var meaningful = result.Split('\n')
-            .Where(l => !l.TrimStart().StartsWith(';') && l.Trim().Length > 0)
+            .Where(l => !l.TrimStart().StartsWith(';') && l.Trim().Length > 0
+                        && l.Trim() != "lorom" && l.Trim() != "hirom"
+                        && l.Trim() != "exhirom" && l.Trim() != "exlorom"
+                        && l.Trim() != "sa1rom")
             .ToList();
         Assert.Empty(meaningful);
     }
@@ -188,11 +205,42 @@ public class SnesAsmExporterTests
     }
 
     // ══════════════════════════════════════════════════════════════════════════
+    // Label lookup via ROM offset (mirror-safe)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Export_Label_UpperBankMirror_ResolvedCorrectly()
+    {
+        // Label stored at upper-bank $808000 (DiztinGUIsh convention).
+        // Should still be found for the byte at canonical $008000 (ROM offset 0).
+        var store = MakeStore([Op()],
+            labels: new() { [0x808000] = "UpperBankLabel" });
+
+        var result = SnesAsmExporter.Export(store, [0xEA]);
+        Assert.Contains("UpperBankLabel:", result);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Non-ROM label assignments
+    // ══════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Export_NonRomLabel_EmittedAsAssignment()
+    {
+        // $002116 is a hardware register (not in ROM for LoRom).
+        var store = MakeStore([Op()],
+            labels: new() { [0x002116] = "SNES_VMADDL" });
+
+        var result = SnesAsmExporter.Export(store, [0xEA]);
+        Assert.Contains("SNES_VMADDL = $002116", result);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
     // Implied / Accumulator addressing
     // ══════════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public void Export_Nop_ImpliedNoOperand()
+    public void Export_Nop_ImpliedNoOperandNoSuffix()
     {
         var result  = SnesAsmExporter.Export(MakeStore([Op()]), [0xEA]);
         var nopLine = result.Split('\n')
@@ -209,7 +257,7 @@ public class SnesAsmExporterTests
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // Immediate modes (M and X flags)
+    // Immediate modes (M and X flags) — with .B/.W suffix
     // ══════════════════════════════════════════════════════════════════════════
 
     [Fact]
@@ -217,7 +265,7 @@ public class SnesAsmExporterTests
     {
         var result = SnesAsmExporter.Export(
             MakeStore([Op(m: true), Opr()]), [0xA9, 0x42]);
-        Assert.Contains("LDA #$42", result);
+        Assert.Contains("LDA.B #$42", result);
     }
 
     [Fact]
@@ -225,7 +273,7 @@ public class SnesAsmExporterTests
     {
         var result = SnesAsmExporter.Export(
             MakeStore([Op(m: false), Opr(), Opr()]), [0xA9, 0x34, 0x12]);
-        Assert.Contains("LDA #$1234", result);
+        Assert.Contains("LDA.W #$1234", result);
     }
 
     [Fact]
@@ -233,7 +281,7 @@ public class SnesAsmExporterTests
     {
         var result = SnesAsmExporter.Export(
             MakeStore([Op(x: true), Opr()]), [0xA2, 0xFF]);
-        Assert.Contains("LDX #$FF", result);
+        Assert.Contains("LDX.B #$FF", result);
     }
 
     [Fact]
@@ -241,11 +289,11 @@ public class SnesAsmExporterTests
     {
         var result = SnesAsmExporter.Export(
             MakeStore([Op(x: false), Opr(), Opr()]), [0xA2, 0xCD, 0xAB]);
-        Assert.Contains("LDX #$ABCD", result);
+        Assert.Contains("LDX.W #$ABCD", result);
     }
 
     [Fact]
-    public void Export_Sep_AlwaysOneByteImmediate()
+    public void Export_Sep_AlwaysOneByteImmediate_NoSuffix()
     {
         var result = SnesAsmExporter.Export(
             MakeStore([Op(), Opr()]), [0xE2, 0x30]);
@@ -253,7 +301,7 @@ public class SnesAsmExporterTests
     }
 
     [Fact]
-    public void Export_Rep_AlwaysOneByteImmediate()
+    public void Export_Rep_AlwaysOneByteImmediate_NoSuffix()
     {
         var result = SnesAsmExporter.Export(
             MakeStore([Op(), Opr()]), [0xC2, 0x30]);
@@ -261,13 +309,13 @@ public class SnesAsmExporterTests
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // Branch instructions with label resolution
+    // Branch instructions with label resolution — no suffix for relative modes
     // ══════════════════════════════════════════════════════════════════════════
 
     [Fact]
     public void Export_BranchForward_UsesLabelName()
     {
-        // BNE at $008000, operand +2 → target = $008000 + 2 + 2 = $008004
+        // BNE at $008000, operand +2 → target = $008004
         var snesTarget = 0x008004;
         var store = MakeStore(
             [Op(), Opr()],
@@ -280,7 +328,7 @@ public class SnesAsmExporterTests
     [Fact]
     public void Export_BranchBackward_UsesLabelName()
     {
-        // BRA at $008002, operand -4 (0xFC signed) → target = $008002 + 2 - 4 = $008000
+        // BRA at $008002, operand -4 (0xFC signed) → target = $008000
         var ann = new[] { Op(), Opr(), Op(), Opr() };
         var store = MakeStore(ann,
             labels: new() { [0x008000] = "LoopTop" });
@@ -301,7 +349,7 @@ public class SnesAsmExporterTests
     [Fact]
     public void Export_Brl_LongBranchResolvesLabel()
     {
-        // BRL at $008000, signed 16-bit operand 0x0005 → target = $008000 + 3 + 5 = $008008
+        // BRL at $008000, signed 16-bit operand 0x0005 → target = $008008
         var store = MakeStore(
             [Op(), Opr(), Opr()],
             labels: new() { [0x008008] = "FarTarget" });
@@ -310,7 +358,7 @@ public class SnesAsmExporterTests
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // JSR / JMP absolute with label
+    // JSR / JMP absolute with label — .W suffix
     // ══════════════════════════════════════════════════════════════════════════
 
     [Fact]
@@ -321,7 +369,7 @@ public class SnesAsmExporterTests
             [Op(), Opr(), Opr()],
             labels: new() { [0x00C000] = "Subroutine" });
         var result = SnesAsmExporter.Export(store, [0x20, 0x00, 0xC0]);
-        Assert.Contains("JSR Subroutine", result);
+        Assert.Contains("JSR.W Subroutine", result);
     }
 
     [Fact]
@@ -331,7 +379,7 @@ public class SnesAsmExporterTests
             [Op(), Opr(), Opr()],
             labels: new() { [0x008010] = "JumpDest" });
         var result = SnesAsmExporter.Export(store, [0x4C, 0x10, 0x80]);
-        Assert.Contains("JMP JumpDest", result);
+        Assert.Contains("JMP.W JumpDest", result);
     }
 
     [Fact]
@@ -339,11 +387,11 @@ public class SnesAsmExporterTests
     {
         var result = SnesAsmExporter.Export(
             MakeStore([Op(), Opr(), Opr()]), [0x4C, 0x00, 0xC0]);
-        Assert.Contains("JMP $C000", result);
+        Assert.Contains("JMP.W $C000", result);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // JSL / JML (24-bit absolute long) with label
+    // JSL / JML (24-bit absolute long) with label — .L suffix
     // ══════════════════════════════════════════════════════════════════════════
 
     [Fact]
@@ -354,7 +402,7 @@ public class SnesAsmExporterTests
             [Op(), Opr(), Opr(), Opr()],
             labels: new() { [0x018000] = "Bank1Entry" });
         var result = SnesAsmExporter.Export(store, [0x22, 0x00, 0x80, 0x01]);
-        Assert.Contains("JSL Bank1Entry", result);
+        Assert.Contains("JSL.L Bank1Entry", result);
     }
 
     [Fact]
@@ -362,11 +410,11 @@ public class SnesAsmExporterTests
     {
         var result = SnesAsmExporter.Export(
             MakeStore([Op(), Opr(), Opr(), Opr()]), [0x5C, 0x00, 0x80, 0x02]);
-        Assert.Contains("JML $028000", result);
+        Assert.Contains("JML.L $028000", result);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // Absolute addressing (data references)
+    // Absolute addressing — .W suffix
     // ══════════════════════════════════════════════════════════════════════════
 
     [Fact]
@@ -374,7 +422,7 @@ public class SnesAsmExporterTests
     {
         var result = SnesAsmExporter.Export(
             MakeStore([Op(), Opr(), Opr()]), [0xAD, 0x00, 0x02]);
-        Assert.Contains("LDA $0200", result);
+        Assert.Contains("LDA.W $0200", result);
     }
 
     [Fact]
@@ -382,7 +430,7 @@ public class SnesAsmExporterTests
     {
         var result = SnesAsmExporter.Export(
             MakeStore([Op(), Opr(), Opr()]), [0x9D, 0x00, 0x20]);
-        Assert.Contains("STA $2000,X", result);
+        Assert.Contains("STA.W $2000,X", result);
     }
 
     [Fact]
@@ -390,11 +438,11 @@ public class SnesAsmExporterTests
     {
         var result = SnesAsmExporter.Export(
             MakeStore([Op(), Opr(), Opr(), Opr()]), [0xAF, 0x56, 0x34, 0x12]);
-        Assert.Contains("LDA $123456", result);
+        Assert.Contains("LDA.L $123456", result);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // Direct page addressing
+    // Direct page addressing — .B suffix
     // ══════════════════════════════════════════════════════════════════════════
 
     [Fact]
@@ -402,7 +450,7 @@ public class SnesAsmExporterTests
     {
         var result = SnesAsmExporter.Export(
             MakeStore([Op(), Opr()]), [0xA5, 0x42]);
-        Assert.Contains("LDA $42", result);
+        Assert.Contains("LDA.B $42", result);
     }
 
     [Fact]
@@ -410,7 +458,7 @@ public class SnesAsmExporterTests
     {
         var result = SnesAsmExporter.Export(
             MakeStore([Op(), Opr()]), [0x95, 0x10]);
-        Assert.Contains("STA $10,X", result);
+        Assert.Contains("STA.B $10,X", result);
     }
 
     [Fact]
@@ -418,7 +466,7 @@ public class SnesAsmExporterTests
     {
         var result = SnesAsmExporter.Export(
             MakeStore([Op(), Opr()]), [0xB2, 0x20]);
-        Assert.Contains("LDA ($20)", result);
+        Assert.Contains("LDA.B ($20)", result);
     }
 
     [Fact]
@@ -426,11 +474,11 @@ public class SnesAsmExporterTests
     {
         var result = SnesAsmExporter.Export(
             MakeStore([Op(), Opr()]), [0xA7, 0x30]);
-        Assert.Contains("LDA [$30]", result);
+        Assert.Contains("LDA.B [$30]", result);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // Stack-relative addressing
+    // Stack-relative addressing — .B suffix
     // ══════════════════════════════════════════════════════════════════════════
 
     [Fact]
@@ -438,7 +486,7 @@ public class SnesAsmExporterTests
     {
         var result = SnesAsmExporter.Export(
             MakeStore([Op(), Opr()]), [0xA3, 0x03]);
-        Assert.Contains("LDA $03,S", result);
+        Assert.Contains("LDA.B $03,S", result);
     }
 
     [Fact]
@@ -446,11 +494,11 @@ public class SnesAsmExporterTests
     {
         var result = SnesAsmExporter.Export(
             MakeStore([Op(), Opr()]), [0xB3, 0x05]);
-        Assert.Contains("LDA ($05,S),Y", result);
+        Assert.Contains("LDA.B ($05,S),Y", result);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // Indirect absolute addressing
+    // Indirect absolute addressing — .W suffix
     // ══════════════════════════════════════════════════════════════════════════
 
     [Fact]
@@ -458,7 +506,7 @@ public class SnesAsmExporterTests
     {
         var result = SnesAsmExporter.Export(
             MakeStore([Op(), Opr(), Opr()]), [0x6C, 0x34, 0x12]);
-        Assert.Contains("JMP ($1234)", result);
+        Assert.Contains("JMP.W ($1234)", result);
     }
 
     [Fact]
@@ -466,7 +514,7 @@ public class SnesAsmExporterTests
     {
         var result = SnesAsmExporter.Export(
             MakeStore([Op(), Opr(), Opr()]), [0xFC, 0x00, 0x90]);
-        Assert.Contains("JSR ($9000,X)", result);
+        Assert.Contains("JSR.W ($9000,X)", result);
     }
 
     [Fact]
@@ -474,11 +522,11 @@ public class SnesAsmExporterTests
     {
         var result = SnesAsmExporter.Export(
             MakeStore([Op(), Opr(), Opr()]), [0xDC, 0x00, 0xFF]);
-        Assert.Contains("JML [$FF00]", result);
+        Assert.Contains("JML.W [$FF00]", result);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // Block move (MVN / MVP)
+    // Block move (MVN / MVP) — no suffix
     // ══════════════════════════════════════════════════════════════════════════
 
     [Fact]
@@ -499,7 +547,7 @@ public class SnesAsmExporterTests
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // PEA (push effective absolute)
+    // PEA (push effective absolute) — .W suffix, no #
     // ══════════════════════════════════════════════════════════════════════════
 
     [Fact]
@@ -507,12 +555,12 @@ public class SnesAsmExporterTests
     {
         var result = SnesAsmExporter.Export(
             MakeStore([Op(), Opr(), Opr()]), [0xF4, 0x34, 0x12]);
-        Assert.Contains("PEA $1234", result);
+        Assert.Contains("PEA.W $1234", result);
         Assert.DoesNotContain("PEA #", result);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // PEI (push effective indirect)
+    // PEI (push effective indirect) — .B suffix
     // ══════════════════════════════════════════════════════════════════════════
 
     [Fact]
@@ -520,11 +568,11 @@ public class SnesAsmExporterTests
     {
         var result = SnesAsmExporter.Export(
             MakeStore([Op(), Opr()]), [0xD4, 0x10]);
-        Assert.Contains("PEI ($10)", result);
+        Assert.Contains("PEI.B ($10)", result);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // WDM
+    // WDM — no suffix (Imm8)
     // ══════════════════════════════════════════════════════════════════════════
 
     [Fact]
@@ -682,21 +730,21 @@ public class SnesAsmExporterTests
         var result = SnesAsmExporter.Export(MakeStore(ann), [0xEA, 0xFF]);
 
         var orgLines = result.Split('\n').Where(l => l.Contains("org")).ToList();
-        // Only the initial org $008000 should appear.
+        // Only the initial org $808000 should appear.
         Assert.Single(orgLines);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // HiRom address mapping
+    // HiRom address mapping — $C00000 convention
     // ══════════════════════════════════════════════════════════════════════════
 
     [Fact]
     public void Export_HiRom_FirstByteOrg()
     {
-        // HiRom offset 0 → SNES $400000 (canonical bank 40–7D).
+        // HiRom offset 0 → SNES $400000 → ASM convention $C00000.
         var result = SnesAsmExporter.Export(
             MakeStore([Op()], map: RomMapMode.HiRom), [0xEA]);
-        Assert.Contains("org $400000", result);
+        Assert.Contains("org $C00000", result);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
