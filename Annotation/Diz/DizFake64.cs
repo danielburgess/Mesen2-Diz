@@ -1,0 +1,67 @@
+namespace Mesen.Annotation.Diz;
+
+/// <summary>
+/// DiztinGUIsh's "hacky base64" — a custom 6-bit encoding that maps a single
+/// byte value (multiple of 4, range 0–252) to a single ASCII character and back.
+///
+/// '0' encodes value 0 (not value 52 as in real Base64), because Diz's
+/// compression is optimised for runs of '0' characters.
+///
+/// Lookup tables are identical to DiztinGUIsh's Fake64Encoding.cs and must
+/// never change — they are embedded in the .diz/.dizraw wire format.
+/// </summary>
+public static class DizFake64
+{
+    private static readonly Dictionary<byte, char> ByteToChar = new()
+    {
+        {   0, '0' },
+        {   4, 'B' }, {   8, 'C' }, {  12, 'D' }, {  16, 'E' }, {  20, 'F' },
+        {  24, 'G' }, {  28, 'H' }, {  32, 'I' }, {  36, 'J' }, {  40, 'K' },
+        {  44, 'L' }, {  48, 'M' }, {  52, 'N' }, {  56, 'O' }, {  60, 'P' },
+        {  64, 'Q' }, {  68, 'R' }, {  72, 'S' }, {  76, 'T' }, {  80, 'U' },
+        {  84, 'V' }, {  88, 'W' }, {  92, 'X' }, {  96, 'Y' }, { 100, 'Z' },
+        { 104, 'a' }, { 108, 'b' }, { 112, 'c' }, { 116, 'd' }, { 120, 'e' },
+        { 124, 'f' }, { 128, 'g' }, { 132, 'h' }, { 136, 'i' }, { 140, 'j' },
+        { 144, 'k' }, { 148, 'l' }, { 152, 'm' }, { 156, 'n' }, { 160, 'o' },
+        { 164, 'p' }, { 168, 'q' }, { 172, 'r' }, { 176, 's' }, { 180, 't' },
+        { 184, 'u' }, { 188, 'v' }, { 192, 'w' }, { 196, 'x' }, { 200, 'y' },
+        { 204, 'z' }, { 208, 'A' }, { 212, '1' }, { 216, '2' }, { 220, '3' },
+        { 224, '4' }, { 228, '5' }, { 232, '6' }, { 236, '7' }, { 240, '8' },
+        { 244, '9' }, { 248, '+' }, { 252, '/' },
+    };
+
+    private static readonly Dictionary<char, byte> CharToByte = new()
+    {
+        { '0',   0 },
+        { 'B',   4 }, { 'C',   8 }, { 'D',  12 }, { 'E',  16 }, { 'F',  20 },
+        { 'G',  24 }, { 'H',  28 }, { 'I',  32 }, { 'J',  36 }, { 'K',  40 },
+        { 'L',  44 }, { 'M',  48 }, { 'N',  52 }, { 'O',  56 }, { 'P',  60 },
+        { 'Q',  64 }, { 'R',  68 }, { 'S',  72 }, { 'T',  76 }, { 'U',  80 },
+        { 'V',  84 }, { 'W',  88 }, { 'X',  92 }, { 'Y',  96 }, { 'Z', 100 },
+        { 'a', 104 }, { 'b', 108 }, { 'c', 112 }, { 'd', 116 }, { 'e', 120 },
+        { 'f', 124 }, { 'g', 128 }, { 'h', 132 }, { 'i', 136 }, { 'j', 140 },
+        { 'k', 144 }, { 'l', 148 }, { 'm', 152 }, { 'n', 156 }, { 'o', 160 },
+        { 'p', 164 }, { 'q', 168 }, { 'r', 172 }, { 's', 176 }, { 't', 180 },
+        { 'u', 184 }, { 'v', 188 }, { 'w', 192 }, { 'x', 196 }, { 'y', 200 },
+        { 'z', 204 }, { 'A', 208 }, { '1', 212 }, { '2', 216 }, { '3', 220 },
+        { '4', 224 }, { '5', 228 }, { '6', 232 }, { '7', 236 }, { '8', 240 },
+        { '9', 244 }, { '+', 248 }, { '/', 252 },
+    };
+
+    public static char Encode(byte value)
+    {
+        if (!ByteToChar.TryGetValue(value, out var ch))
+            throw new ArgumentException($"Value {value} has no Fake64 encoding (must be a multiple of 4 in range 0–252).");
+        return ch;
+    }
+
+    public static byte Decode(char ch)
+    {
+        if (!CharToByte.TryGetValue(ch, out var value))
+            throw new ArgumentException($"Character '{ch}' is not a valid Fake64 character.");
+        return value;
+    }
+
+    /// <summary>All byte→char mappings in the Fake64 table (for testing).</summary>
+    public static IReadOnlyDictionary<byte, char> AllEntries => ByteToChar;
+}
