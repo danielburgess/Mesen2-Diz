@@ -7,8 +7,9 @@ namespace Mesen.Annotation.Asm;
 /// Asar-compatible 65816 assembly source file (.asm).
 ///
 /// Each mapped, annotated byte in the ROM is emitted either as a disassembled
-/// instruction (for Opcode bytes) or as a db/dw/dl/dd data directive (for Data
-/// bytes). Unreached bytes are skipped and cause an org gap for whatever follows.
+/// instruction (for Opcode bytes), as a db data directive (for Unreached and
+/// stray Operand bytes), or as a db/dw/dl/dd data directive (for Data bytes).
+/// No bytes are silently skipped — this matches DiztinGUIsh behaviour.
 ///
 /// Labels are emitted above their target byte. Inline comments appear as
 /// trailing ; remarks on the same line. Label-comments (DiztinGUIsh block
@@ -53,6 +54,19 @@ public static class SnesAsmExporter
         var commentsByOffset      = BuildOffsetDict(store.Comments,      map);
         var labelCommentsByOffset = BuildOffsetDict(store.LabelComments, map);
 
+        // Pre-pass: generate CODE_XXXXXX labels for branch targets that have no
+        // user label.  LOOSE_OP_XXXXXX labels are generated for targets landing
+        // inside instructions (Operand bytes) and emitted as address assignments.
+        var (synthLabelsByOffset, looseLabelsByOffset) =
+            BuildSynthBranchLabels(store, romBytes, labelsByOffset, map);
+
+        // Merged view: user labels win; synthetic and loose labels fill the rest.
+        var allLabelsByOffset = new Dictionary<int, string>(labelsByOffset);
+        foreach (var (offset, name) in synthLabelsByOffset)
+            allLabelsByOffset.TryAdd(offset, name);
+        foreach (var (offset, name) in looseLabelsByOffset)
+            allLabelsByOffset.TryAdd(offset, name);
+
         var sb = new StringBuilder(romBytes.Length * 6);
         EmitFileHeader(sb, store);
 
@@ -63,15 +77,6 @@ public static class SnesAsmExporter
         while (i < romLen)
         {
             var ann = store.Bytes[i];
-
-            // Skip unreached bytes and stray Operand bytes (no preceding Opcode).
-            // Reset prevSnesAddr so that whatever follows gets a fresh org.
-            if (ann.Type == ByteType.Unreached || ann.Type == ByteType.Operand)
-            {
-                prevSnesAddr = -1;
-                i++;
-                continue;
-            }
 
             if (!SnesAddressConverter.TryToSnesAddress(i, romLen, map, out int snesAddr))
             {
@@ -95,8 +100,11 @@ public static class SnesAsmExporter
                     sb.AppendLine($"; {line.TrimEnd('\r')}");
             }
 
-            // Label itself.
-            if (labelsByOffset.TryGetValue(i, out var label) && label.Length > 0)
+            // Label itself (user-defined or synthetic).
+            // LOOSE_OP_ labels are not positional — they are emitted as address
+            // assignments at the end of the file.
+            if (allLabelsByOffset.TryGetValue(i, out var label) && label.Length > 0
+                && !looseLabelsByOffset.ContainsKey(i))
                 sb.AppendLine($"{label}:");
 
             commentsByOffset.TryGetValue(i, out var inlineComment);
@@ -104,10 +112,17 @@ public static class SnesAsmExporter
             int size;
             if (ann.Type == ByteType.Opcode)
                 size = EmitInstruction(sb, romBytes, i, snesAddr, ann, inlineComment,
-                                       labelsByOffset, map);
+                                       allLabelsByOffset, map);
+            else if (ann.Type == ByteType.Unreached || ann.Type == ByteType.Operand)
+            {
+                // Emit every byte including unreached and stray operand bytes.
+                // Matches DiztinGUIsh behaviour: no bytes are silently skipped.
+                sb.AppendLine($"        db ${romBytes[i]:X2}");
+                size = 1;
+            }
             else
                 size = EmitDataGroup(sb, store, romBytes, i, ann.Type, inlineComment,
-                                     labelsByOffset, commentsByOffset, labelCommentsByOffset,
+                                     allLabelsByOffset, commentsByOffset, labelCommentsByOffset,
                                      romLen, map);
 
             prevSnesAddr = snesAddr;
@@ -115,7 +130,7 @@ public static class SnesAsmExporter
             i           += size;
         }
 
-        EmitNonRomLabels(sb, store, labelsByOffset);
+        EmitLabelAssignments(sb, store, looseLabelsByOffset);
 
         return sb.ToString();
     }
@@ -189,12 +204,16 @@ public static class SnesAsmExporter
         int i      = startRom;
         var elems  = new List<string>(DataLineMaxBytes / elemBytes + 1);
         string? pendingComment = firstComment;
+        int prevElemSnes = -1;
 
         while (i < romLen)
         {
             if (store.Bytes[i].Type != type) break;
 
-            if (!SnesAddressConverter.TryToSnesAddress(i, romLen, map, out _)) break;
+            if (!SnesAddressConverter.TryToSnesAddress(i, romLen, map, out int elemSnes)) break;
+
+            // Break on SNES address gap (e.g. LoRom bank boundary between $xxFFFF and $yy8000).
+            if (prevElemSnes >= 0 && elemSnes != prevElemSnes + elemBytes) break;
 
             // A label, label-comment, or inline comment at a non-first byte
             // ends the group so annotations can be re-emitted on the new line.
@@ -218,6 +237,7 @@ public static class SnesAsmExporter
                 4 => $"${val:X8}",
                 _ => $"${val:X2}",
             });
+            prevElemSnes = elemSnes;
             i += elemBytes;
 
             if (elems.Count * elemBytes >= DataLineMaxBytes)
@@ -246,45 +266,50 @@ public static class SnesAsmExporter
         sb.AppendLine(line.ToString());
     }
 
-    // ── Non-ROM label assignments ──────────────────────────────────────────────
+    // ── Label address assignments ──────────────────────────────────────────────
 
     /// <summary>
-    /// Emit NAME = $SNESADDR lines for all labels whose SNES address does not
-    /// map to any ROM offset (hardware registers, WRAM variables, etc.).
+    /// Emit NAME = $SNESADDR lines for:
+    /// <list type="bullet">
+    ///   <item>User labels whose SNES address does not map to any ROM offset
+    ///         (hardware registers, WRAM variables, etc.).</item>
+    ///   <item>LOOSE_OP_ synthetic labels for branch targets that land inside
+    ///         another instruction (Operand bytes). These cannot be positional
+    ///         labels in the instruction stream.</item>
+    /// </list>
     /// </summary>
-    private static void EmitNonRomLabels(
+    private static void EmitLabelAssignments(
         StringBuilder sb,
         RomAnnotationStore store,
-        Dictionary<int, string> labelsByOffset)
+        Dictionary<int, string> looseLabelsByOffset)
     {
-        var nonRom = new List<(string name, int addr)>();
+        int romLen = store.Bytes.Length;
+        var assignments = new List<(string name, int addr)>();
+
+        // Non-ROM user labels (hardware registers, WRAM, etc.)
         foreach (var (snesAddr, name) in store.Labels)
         {
             if (name.Length == 0) continue;
             if (!SnesAddressConverter.TryToRomOffset(snesAddr, store.MapMode, out _))
-                nonRom.Add((name, snesAddr));
+                assignments.Add((name, snesAddr));
         }
 
-        if (nonRom.Count == 0) return;
+        // LOOSE_OP_ labels for branch targets inside instructions
+        foreach (var (offset, name) in looseLabelsByOffset)
+        {
+            if (SnesAddressConverter.TryToSnesAddress(offset, romLen, store.MapMode, out int snesAddr))
+                assignments.Add((name, snesAddr));
+        }
 
-        nonRom.Sort((a, b) => a.addr.CompareTo(b.addr));
+        if (assignments.Count == 0) return;
+
+        assignments.Sort((a, b) => a.addr.CompareTo(b.addr));
         sb.AppendLine();
-        foreach (var (name, addr) in nonRom)
+        foreach (var (name, addr) in assignments)
             sb.AppendLine($"{name} = ${addr:X6}");
     }
 
     // ── Address helpers ────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Convert a canonical SNES address to the Asar/DiztinGUIsh upper-bank
-    /// convention: addresses below $800000 have bit 23 set (bank ≥ $80).
-    /// ExHiRom addresses are already in the $C0+ range and are returned as-is.
-    /// </summary>
-    private static int AsmSnesAddr(int snesAddr, RomMapMode mode)
-    {
-        if (mode == RomMapMode.ExHiRom) return snesAddr;
-        return snesAddr < 0x800000 ? snesAddr | 0x800000 : snesAddr;
-    }
 
     private static string MapModeDirective(RomMapMode mode) => mode switch
     {
@@ -322,6 +347,80 @@ public static class SnesAsmExporter
 
     // ── ROM-offset dict helpers ────────────────────────────────────────────────
 
+    /// <summary>
+    /// Pre-pass: for every Rel8/Rel16 branch instruction, generate synthetic labels
+    /// for branch targets that have no user label.
+    /// <list type="bullet">
+    ///   <item><c>CODE_XXXXXX</c> — positional label for reachable bytes (Opcode,
+    ///         Unreached, Data, etc.). Uses the upper-bank SNES address form so that
+    ///         asar defines the label at the correct 24-bit address.</item>
+    ///   <item><c>LOOSE_OP_XXXXXX</c> — address-assignment label for targets landing
+    ///         inside another instruction (Operand bytes). Returned separately and
+    ///         emitted as <c>NAME = $ADDR</c> at the end of the file.</item>
+    /// </list>
+    /// </summary>
+    private static (Dictionary<int, string> synthLabels, Dictionary<int, string> looseLabels)
+        BuildSynthBranchLabels(
+            RomAnnotationStore store,
+            byte[] romBytes,
+            Dictionary<int, string> userLabelsByOffset,
+            RomMapMode map)
+    {
+        int romLen = romBytes.Length;
+        var synthLabels = new Dictionary<int, string>();
+        var looseLabels = new Dictionary<int, string>();
+
+        for (int i = 0; i < romLen; i++)
+        {
+            if (store.Bytes[i].Type != ByteType.Opcode) continue;
+            if (!SnesAddressConverter.TryToSnesAddress(i, romLen, map, out int snesAddr)) continue;
+
+            var info = Table[romBytes[i]];
+
+            int targetSnes;
+            if (info.Mode == AddrMode.Rel8)
+            {
+                if (i + 1 >= romLen) continue;
+                targetSnes = (snesAddr & 0xFF0000) |
+                             ((snesAddr + 2 + (sbyte)romBytes[i + 1]) & 0xFFFF);
+            }
+            else if (info.Mode == AddrMode.Rel16)
+            {
+                // PER (0x62): the 16-bit operand is a literal relative offset;
+                // we emit it as "PER $XXXX" using the raw offset bytes directly.
+                // No synthetic label is needed.
+                if (romBytes[i] == 0x62) continue;
+                if (i + 2 >= romLen) continue;
+                int w = romBytes[i + 1] | (romBytes[i + 2] << 8);
+                targetSnes = (snesAddr & 0xFF0000) |
+                             ((snesAddr + 3 + (short)w) & 0xFFFF);
+            }
+            else continue;
+
+            if (!SnesAddressConverter.TryToRomOffset(targetSnes, map, out int targetOffset)) continue;
+            if (targetOffset >= romLen) continue;
+
+            if (store.Bytes[targetOffset].Type == ByteType.Operand)
+            {
+                // Target lands inside another instruction — it can never receive a
+                // positional label.  Generate a LOOSE_OP_ assignment label instead.
+                if (!userLabelsByOffset.ContainsKey(targetOffset))
+                {
+                    if (SnesAddressConverter.TryToSnesAddress(targetOffset, romLen, map, out int tSnes))
+                        looseLabels.TryAdd(targetOffset, $"LOOSE_OP_{tSnes:X6}");
+                }
+                continue;
+            }
+
+            if (userLabelsByOffset.ContainsKey(targetOffset)) continue;
+
+            if (SnesAddressConverter.TryToSnesAddress(targetOffset, romLen, map, out int canonSnes))
+                synthLabels.TryAdd(targetOffset, $"CODE_{AsmSnesAddr(canonSnes, map):X6}");
+        }
+
+        return (synthLabels, looseLabels);
+    }
+
     private static Dictionary<int, string> BuildOffsetDict(
         IReadOnlyDictionary<int, string> byAddr,
         RomMapMode map)
@@ -344,6 +443,24 @@ public static class SnesAsmExporter
             return null;
         return labelsByOffset.TryGetValue(offset, out var name) && name.Length > 0 ? name : null;
     }
+
+    // ── Asar ORG / label address form ─────────────────────────────────────────
+
+    /// <summary>
+    /// Convert a canonical SNES address to the form used in Asar ORG directives
+    /// and CODE_ synthetic label names.
+    ///
+    /// For LoRom/ExLoRom/Sa1Rom, canonical lower-bank addresses (bank 0x00–0x3F/7F)
+    /// mirror to upper-bank (0x80–0xBF/FF) in SNES address space.  Labels must be
+    /// defined at the upper-bank address so that JSL/JML 24-bit encodings use the
+    /// correct bank byte; Asar maps both forms to the same ROM offset with the
+    /// <c>lorom</c> directive.
+    /// </summary>
+    private static int AsmSnesAddr(int snesAddr, RomMapMode map) =>
+        map is RomMapMode.LoRom or RomMapMode.ExLoRom or RomMapMode.Sa1Rom
+            && (snesAddr >> 16) < 0x80
+            ? snesAddr | 0x800000
+            : snesAddr;
 
     // ── Operand formatting ────────────────────────────────────────────────────
 
@@ -396,6 +513,11 @@ public static class SnesAsmExporter
                     ? $"{ll},X" : $"${U24(ops):X6},X",
 
             AddrMode.Rel8  => FormatRel8(ops[0], snesAddr, labelsByOffset, map),
+
+            // PER ($62): the 16-bit operand is a literal relative offset that asar
+            // encodes as-is.  Do NOT compute an effective address — asar does not
+            // do PC-relative arithmetic for PER when given a numeric literal.
+            AddrMode.Rel16 when opcode == 0x62 => $"${U16(ops):X4}",
             AddrMode.Rel16 => FormatRel16(U16(ops), snesAddr, labelsByOffset, map),
 
             // MVN/MVP: ROM encoding is [opcode][srcbk][dstbk]; mnemonic is src,dst.
@@ -425,14 +547,16 @@ public static class SnesAsmExporter
         Dictionary<int, string> labelsByOffset, RomMapMode map)
     {
         int target = (snesAddr & 0xFF0000) | ((snesAddr + 2 + (sbyte)b) & 0xFFFF);
-        return TryLabelByOffset(labelsByOffset, target, map) ?? $"${target:X6}";
+        // allLabelsByOffset includes synthetic CODE_XXXXXX labels, so a 4-digit
+        // fallback is only reached for out-of-ROM targets.
+        return TryLabelByOffset(labelsByOffset, target, map) ?? $"${target & 0xFFFF:X4}";
     }
 
     private static string FormatRel16(int w, int snesAddr,
         Dictionary<int, string> labelsByOffset, RomMapMode map)
     {
         int target = (snesAddr & 0xFF0000) | ((snesAddr + 3 + (short)w) & 0xFFFF);
-        return TryLabelByOffset(labelsByOffset, target, map) ?? $"${target:X6}";
+        return TryLabelByOffset(labelsByOffset, target, map) ?? $"${target & 0xFFFF:X4}";
     }
 
     // ── Misc helpers ──────────────────────────────────────────────────────────

@@ -99,6 +99,7 @@ public class SnesAsmExporterTests
     [Fact]
     public void Export_FirstByte_EmitsOrg()
     {
+        // LoRom offset 0 → canonical $008000 → upper-bank org $808000.
         var result = SnesAsmExporter.Export(MakeStore([Op()]), [0xEA]);
         Assert.Contains("org $808000", result);
     }
@@ -106,7 +107,9 @@ public class SnesAsmExporterTests
     [Fact]
     public void Export_BankBoundary_EmitsNewOrg()
     {
-        // First LoRom bank is 0x8000 bytes. Offset 0x8000 → SNES $018000 → ASM $818000.
+        // LoRom bank 0: offsets 0..0x7FFF → SNES $808000–$80FFFF.
+        // LoRom bank 1: offsets 0x8000..0xFFFF → SNES $818000–$81FFFF.
+        // The gap $810000–$817FFF in SNES space triggers a fresh org for bank 1.
         int bankSize = 0x8000;
         var ann = new ByteAnnotation[bankSize + 1];
         for (int i = 0; i < bankSize; i++)
@@ -121,29 +124,24 @@ public class SnesAsmExporterTests
     }
 
     [Fact]
-    public void Export_Gap_EmitsSecondOrg()
+    public void Export_Unreached_BridgesGap_NoExtraOrg()
     {
-        // Offset 0 → $008000 → $808000, offset 1 = Unreached, offset 2 → $008002 → $808002.
+        // Offset 0 (NOP), offset 1 (Unreached → db $00), offset 2 (NOP).
+        // All three bytes are contiguous in SNES address space → only one org.
         var ann = new ByteAnnotation[] { Op(), new() { Type = ByteType.Unreached }, Op() };
         var result = SnesAsmExporter.Export(MakeStore(ann), [0xEA, 0x00, 0xEA]);
         Assert.Contains("org $808000", result);
-        Assert.Contains("org $808002", result);
+        var orgLines = result.Split('\n').Where(l => l.Contains("org $")).ToList();
+        Assert.Single(orgLines);
     }
 
     [Fact]
-    public void Export_Unreached_NotEmittedAsInstruction()
+    public void Export_Unreached_EmittedAsDb()
     {
+        // Unreached bytes must appear as db directives, not be silently skipped.
         var result = SnesAsmExporter.Export(
             MakeStore([new ByteAnnotation { Type = ByteType.Unreached }]), [0xFF]);
-
-        // Only header comment lines, the map-mode directive, and whitespace; no org, no data.
-        var meaningful = result.Split('\n')
-            .Where(l => !l.TrimStart().StartsWith(';') && l.Trim().Length > 0
-                        && l.Trim() != "lorom" && l.Trim() != "hirom"
-                        && l.Trim() != "exhirom" && l.Trim() != "exlorom"
-                        && l.Trim() != "sa1rom")
-            .ToList();
-        Assert.Empty(meaningful);
+        Assert.Contains("db $FF", result);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -340,10 +338,73 @@ public class SnesAsmExporterTests
     [Fact]
     public void Export_BranchNoLabel_UsesHexSnesAddress()
     {
-        // BEQ at $008000, operand 0 → target = $008002
+        // BEQ at $008000, operand 0 → target = $008002 (ROM offset 2, beyond this 2-byte ROM).
+        // No synth label can be emitted for an out-of-ROM target, so 4-digit hex fallback is used.
+        // Low 16 bits of $008002 = $8002.
         var result = SnesAsmExporter.Export(
             MakeStore([Op(), Opr()]), [0xF0, 0x00]);
-        Assert.Contains("BEQ $008002", result);
+        Assert.Contains("BEQ $8002", result);
+    }
+
+    [Fact]
+    public void Export_BranchNoLabel_InRom_UsesSynthLabel()
+    {
+        // BNE at $808000, operand +2 → target = $808004 (ROM offset 4, within a 5-byte ROM).
+        // No user label → synth label CODE_808004 (upper-bank) emitted positionally.
+        // ROM: BNE +2, NOP, NOP, NOP, NOP
+        var bytes = new byte[] { 0xD0, 0x02, 0xEA, 0xEA, 0xEA };
+        var store = MakeStore([Op(), Opr(), Op(), Op(), Op()]);
+        var result = SnesAsmExporter.Export(store, bytes);
+        Assert.Contains("BNE CODE_808004", result);
+        Assert.Contains("CODE_808004:", result);
+    }
+
+    [Fact]
+    public void Export_BranchToUnreachedByte_EmitsSynthLabelAndDb()
+    {
+        // BNE at $808000, operand 0x00 → target = $808002 (ROM offset 2, Unreached).
+        // Unreached bytes are now emitted as db, so CODE_808002 is a positional label.
+        var bytes = new byte[] { 0xD0, 0x00, 0xFF };
+        var store = MakeStore([Op(), Opr(), new() { Type = ByteType.Unreached }]);
+        var result = SnesAsmExporter.Export(store, bytes);
+        Assert.Contains("BNE CODE_808002", result);
+        Assert.Contains("CODE_808002:", result);
+        Assert.Contains("db $FF", result);
+    }
+
+    [Fact]
+    public void Export_BranchToOperandByte_UsesLooseLabel()
+    {
+        // BNE at $808000, operand 0x01 → target = $808003 (ROM offset 3, Operand of LDA).
+        // Layout: BNE +1 | BNE-opr | LDA.B opcode | LDA.B opr ← branch target | NOP
+        //   offset 0 = BNE (Op), 1 = BNE opr (Opr)
+        //   offset 2 = LDA.B opcode (Op), 3 = LDA.B operand (Opr) ← branch lands here
+        //   offset 4 = NOP (Op)
+        // Target is an Operand byte inside LDA — generates LOOSE_OP_008003 = $008003.
+        var bytes = new byte[] { 0xD0, 0x01, 0xA5, 0x00, 0xEA };
+        var store = MakeStore([Op(), Opr(), Op(), Opr(), Op()]);
+        var result = SnesAsmExporter.Export(store, bytes);
+        Assert.Contains("BNE LOOSE_OP_008003", result);
+        Assert.Contains("LOOSE_OP_008003 = $008003", result);
+        Assert.DoesNotContain("CODE_008003", result);
+        Assert.DoesNotContain("BNE $8003", result);
+    }
+
+    [Fact]
+    public void Export_Per_NeverGeneratesSynthLabel_UsesRawOffset()
+    {
+        // PER ($62) operand is a literal 16-bit relative offset encoded as-is by asar.
+        // PER at $808000, 16-bit operand bytes 0x73 0x01 → raw offset = $0173.
+        // No synth or loose label; output is "PER $0173" so asar encodes 62 73 01.
+        // Layout: PER (3 bytes), NOP
+        var bytes = new byte[] { 0x62, 0x73, 0x01, 0xEA };
+        var store = MakeStore([Op(), Opr(), Opr(), Op()]);
+        var result = SnesAsmExporter.Export(store, bytes);
+        Assert.DoesNotContain("CODE_008176", result);
+        Assert.DoesNotContain("CODE_808176", result);
+        Assert.DoesNotContain("LOOSE_OP_008176", result);
+        Assert.Contains("PER $0173", result);
+        Assert.DoesNotContain("PER $8176", result);
     }
 
     [Fact]
@@ -682,6 +743,41 @@ public class SnesAsmExporterTests
     }
 
     // ══════════════════════════════════════════════════════════════════════════
+    // LoRom bank boundary — data must not cross $xxFFFF → $yy8000 gap
+    // ══════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Export_Data_DoesNotCrossLoRomBankBoundary()
+    {
+        // LoRom bank 0: offsets 0x0000-0x7FFF → SNES $808000-$80FFFF
+        // LoRom bank 1: offsets 0x8000-0xFFFF → SNES $818000-$81FFFF
+        // Place 4 data bytes: last 2 of bank 0 and first 2 of bank 1.
+        int bankSize = 0x8000;
+        var ann = new ByteAnnotation[bankSize + 2];
+        for (int idx = 0; idx < ann.Length; idx++)
+            ann[idx] = new ByteAnnotation { Type = ByteType.Unreached };
+        ann[bankSize - 2] = D8();
+        ann[bankSize - 1] = D8();
+        ann[bankSize]     = D8();
+        ann[bankSize + 1] = D8();
+
+        var rom = new byte[bankSize + 2];
+        rom[bankSize - 2] = 0xAA;
+        rom[bankSize - 1] = 0xBB;
+        rom[bankSize]     = 0xCC;
+        rom[bankSize + 1] = 0xDD;
+
+        var result = SnesAsmExporter.Export(MakeStore(ann), rom);
+
+        // Data must not cross the bank boundary ($AA,$BB in bank 0, $CC,$DD in bank 1).
+        Assert.Contains("db $AA,$BB", result);
+        Assert.Contains("db $CC,$DD", result);
+        // Each bank must get its own org directive (upper-bank form for LoRom).
+        Assert.Contains("org $808000", result);
+        Assert.Contains("org $818000", result);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
     // Type mixing: different data widths don't merge
     // ══════════════════════════════════════════════════════════════════════════
 
@@ -725,7 +821,7 @@ public class SnesAsmExporterTests
     [Fact]
     public void Export_InstructionFollowedByData_NoOrgInBetween()
     {
-        // NOP (1 byte) at $008000, db at $008001 — contiguous, no extra org.
+        // NOP (1 byte) at $808000, db at $808001 — contiguous, no extra org.
         var ann = new[] { Op(), D8() };
         var result = SnesAsmExporter.Export(MakeStore(ann), [0xEA, 0xFF]);
 
@@ -741,10 +837,10 @@ public class SnesAsmExporterTests
     [Fact]
     public void Export_HiRom_FirstByteOrg()
     {
-        // HiRom offset 0 → SNES $400000 → ASM convention $C00000.
+        // HiRom offset 0 → canonical SNES $400000.
         var result = SnesAsmExporter.Export(
             MakeStore([Op()], map: RomMapMode.HiRom), [0xEA]);
-        Assert.Contains("org $C00000", result);
+        Assert.Contains("org $400000", result);
     }
 
     // ══════════════════════════════════════════════════════════════════════════

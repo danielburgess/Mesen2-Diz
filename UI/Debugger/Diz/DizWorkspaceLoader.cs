@@ -172,7 +172,7 @@ namespace Mesen.Debugger.Diz
 
 			try {
 				string asm = SnesAsmExporter.Export(updated, romBytes);
-				File.WriteAllText(path, asm, System.Text.Encoding.UTF8);
+				File.WriteAllText(path, asm, new System.Text.UTF8Encoding(false));
 			} catch(Exception ex) {
 				MesenMsgBox.Show(null, "DizExportError", MessageBoxButtons.OK, MessageBoxIcon.Error, ex.Message);
 				return;
