@@ -2,7 +2,7 @@ namespace Mesen.Annotation;
 
 /// <summary>
 /// SNES ROM mapping hardware type. Numeric values are identical to
-/// DiztinGUIsh's RomMapMode enum and must never change — they are the wire
+/// DiztinGUIsh's RomMapMode enum and must never change (but can be added to) — they are the wire
 /// format for .diz/.dizraw import/export.
 /// </summary>
 public enum RomMapMode : byte
