@@ -17,6 +17,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
+using System.Reactive.Linq;
 
 namespace Mesen.Debugger.ViewModels
 {
@@ -174,21 +175,57 @@ namespace Mesen.Debugger.ViewModels
 						}
 					}
 				},
+
+				new ContextMenuSeparator(),
+
+				new ContextMenuAction() {
+					ActionType = ActionType.FindReplaceInComments,
+					OnClick = () => LabelFindReplaceWindow.Open(parent)
+				},
+
+				new ContextMenuAction() {
+					ActionType = ActionType.ToggleInlineLabelEdit,
+					IsSelected = () => ConfigManager.Config.Debug.Debugger.InlineLabelEditEnabled,
+					OnClick = () => {
+						ConfigManager.Config.Debug.Debugger.InlineLabelEditEnabled =
+							!ConfigManager.Config.Debug.Debugger.InlineLabelEditEnabled;
+					}
+				},
 			}));
 		}
 	}
 
-	public class LabelViewModel : INotifyPropertyChanged
+	public class LabelViewModel : INotifyPropertyChanged, IInlineEditable
 	{
 		private string _format;
 		private bool _isUnmappedType;
+		private string _labelText;
+		private string _labelComment;
 
 		public CodeLabel Label { get; set; }
 		public CpuType CpuType { get; }
 		public string AbsAddressDisplay { get; }
 
-		public string LabelText { get; private set; }
-		public string LabelComment { get; private set; }
+		public string LabelText
+		{
+			get => _labelText;
+			set {
+				if(_labelText == value) return;
+				_labelText = value;
+				PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LabelText)));
+			}
+		}
+
+		public string LabelComment
+		{
+			get => _labelComment;
+			set {
+				if(_labelComment == value) return;
+				_labelComment = value;
+				PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LabelComment)));
+			}
+		}
+
 		public int RelAddress { get; private set; }
 		public string RelAddressDisplay => RelAddress >= 0 ? ("$" + RelAddress.ToString(_format)) : (_isUnmappedType ? "" : "<unavailable>");
 		public object RowBrush => RelAddress >= 0 || _isUnmappedType ? AvaloniaProperty.UnsetValue : Brushes.Gray;
@@ -207,11 +244,51 @@ namespace Mesen.Debugger.ViewModels
 			}
 		}
 
+		/// <summary>
+		/// Persist pending label/comment edits to <see cref="LabelManager"/>.
+		/// Silently reverts the label name if it fails validation.
+		/// </summary>
+		public void CommitInlineEdit()
+		{
+			bool changed = false;
+			CodeLabel updated = Label.Clone();
+
+			if(_labelText != Label.Label) {
+				if(_labelText.Length == 0 || LabelManager.LabelRegex.IsMatch(_labelText)) {
+					updated.Label = _labelText;
+					changed = true;
+				} else {
+					// Invalid name — revert to stored value.
+					_labelText = Label.Label;
+					PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LabelText)));
+				}
+			}
+
+			if(_labelComment != Label.Comment) {
+				updated.Comment = _labelComment;
+				changed = true;
+			}
+
+			if(changed) {
+				LabelManager.DeleteLabel(Label, false);
+				LabelManager.SetLabel(updated, true);
+				DebugWorkspaceManager.AutoSave();
+				// LabelManager fires OnLabelUpdated → UpdateLabelList() replaces rows.
+			}
+		}
+
+		/// <summary>Discard pending edits and revert cells to stored values.</summary>
+		public void CancelInlineEdit()
+		{
+			LabelText = Label.Label;
+			LabelComment = Label.Comment;
+		}
+
 		public LabelViewModel(CodeLabel label, CpuType cpuType)
 		{
 			Label = label;
-			LabelText = label.Label;
-			LabelComment = label.Comment;
+			_labelText = label.Label;
+			_labelComment = label.Comment;
 			CpuType = cpuType;
 			RelAddress = Label.GetRelativeAddress(CpuType).Address;
 			_format = "X" + cpuType.GetAddressSize();

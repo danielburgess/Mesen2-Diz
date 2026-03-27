@@ -542,7 +542,7 @@ namespace Mesen.Debugger.Utilities
 		[IconFile("VideoFilter")]
 		OpenPaletteViewer,
 
-		[IconFile("VerticalLayout")]
+		[IconFile("RomMap")]
 		OpenRomMapViewer,
 
 		[IconFile("Chip")]
@@ -896,5 +896,9 @@ namespace Mesen.Debugger.Utilities
 		ResetProfilerData,
 		[IconFile("Copy")]
 		CopyToClipboard,
+
+		[IconFile("Find")]
+		FindReplaceInComments,
+		ToggleInlineLabelEdit,
 	}
 }

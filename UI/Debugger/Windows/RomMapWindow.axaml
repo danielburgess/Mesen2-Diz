@@ -12,7 +12,7 @@
 	x:DataType="dvm:RomMapViewModel"
 	Width="700" Height="600"
 	Title="{l:Translate wndTitle}"
-	Icon="/Assets/VerticalLayout.png"
+	Icon="/Assets/RomMap.png"
 >
 	<DockPanel>
 		<Panel DockPanel.Dock="Top">

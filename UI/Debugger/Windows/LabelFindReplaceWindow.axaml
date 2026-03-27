@@ -1,0 +1,47 @@
+<Window
+	xmlns="https://github.com/avaloniaui"
+	xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+	xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+	xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+	xmlns:l="using:Mesen.Localization"
+	xmlns:dvm="using:Mesen.Debugger.ViewModels"
+	mc:Ignorable="d" d:DesignWidth="340" d:DesignHeight="160"
+	x:Class="Mesen.Debugger.Windows.LabelFindReplaceWindow"
+	x:DataType="dvm:LabelFindReplaceViewModel"
+	SizeToContent="Height"
+	Width="340"
+	CanResize="False"
+	Title="{l:Translate wndTitle}"
+>
+	<Grid RowDefinitions="Auto,Auto,Auto,Auto" Margin="10">
+		<!-- Find -->
+		<Grid Grid.Row="0" ColumnDefinitions="80,*" Margin="0,0,0,6">
+			<TextBlock Grid.Column="0" Text="{l:Translate lblFind}" VerticalAlignment="Center" />
+			<TextBox   Grid.Column="1" x:Name="txtFind" Text="{Binding FindText}" />
+		</Grid>
+
+		<!-- Replace -->
+		<Grid Grid.Row="1" ColumnDefinitions="80,*" Margin="0,0,0,8">
+			<TextBlock Grid.Column="0" Text="{l:Translate lblReplace}" VerticalAlignment="Center" />
+			<TextBox   Grid.Column="1" Text="{Binding ReplaceText}" />
+		</Grid>
+
+		<!-- Options -->
+		<CheckBox Grid.Row="2" Content="{l:Translate lblMatchCase}" IsChecked="{Binding MatchCase}" Margin="0,0,0,10" />
+
+		<!-- Buttons + match count -->
+		<Grid Grid.Row="3" ColumnDefinitions="*,Auto">
+			<TextBlock
+				Grid.Column="0"
+				Text="{Binding MatchCount, StringFormat={l:Translate fmtMatchCount}}"
+				VerticalAlignment="Center"
+				Opacity="0.7"
+				FontSize="11"
+			/>
+			<StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+				<Button Content="{l:Translate btnReplaceAll}" Click="OnReplaceAllClick" />
+				<Button Content="{l:Translate btnClose}"      Click="OnCloseClick" />
+			</StackPanel>
+		</Grid>
+	</Grid>
+</Window>

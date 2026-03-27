@@ -1106,6 +1106,16 @@
 			<Control ID="lblSelectedColor">Selected Color</Control>
 		</Form>
 
+		<Form ID="LabelFindReplaceWindow">
+			<Control ID="wndTitle">Find/Replace in Comments</Control>
+			<Control ID="lblFind">Find:</Control>
+			<Control ID="lblReplace">Replace:</Control>
+			<Control ID="lblMatchCase">Match case</Control>
+			<Control ID="fmtMatchCount">{0} label(s) match</Control>
+			<Control ID="btnReplaceAll">Replace All</Control>
+			<Control ID="btnClose">Close</Control>
+		</Form>
+
 		<Form ID="RomMapWindow">
 			<Control ID="wndTitle">ROM Map</Control>
 			<Control ID="mnuFile">_File</Control>
@@ -3244,6 +3254,8 @@ E
 			<Value ID="OpenSpriteViewer">Open Sprite Viewer</Value>
 			<Value ID="OpenPaletteViewer">Open Palette Viewer</Value>
 			<Value ID="OpenRomMapViewer">Open ROM Map</Value>
+			<Value ID="FindReplaceInComments">Find/Replace in Comments</Value>
+			<Value ID="ToggleInlineLabelEdit">Inline Label Editing</Value>
 			<Value ID="Reset">Reset</Value>
 			<Value ID="PowerCycle">Power cycle</Value>
 			<Value ID="ReloadRom">Reload ROM</Value>
@@ -3528,6 +3540,8 @@ E
 			<Value ID="OpenSpriteViewer">Sprite Viewer</Value>
 			<Value ID="OpenPaletteViewer">Palette Viewer</Value>
 			<Value ID="OpenRomMapViewer">ROM Map</Value>
+			<Value ID="FindReplaceInComments">Find/Replace Comments</Value>
+			<Value ID="ToggleInlineLabelEdit">Inline Editing</Value>
 			<Value ID="OpenDebugSettings">Settings</Value>
 
 			<Value ID="Tools">Tools</Value>

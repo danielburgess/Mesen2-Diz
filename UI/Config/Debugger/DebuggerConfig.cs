@@ -88,6 +88,8 @@ namespace Mesen.Config
 		[Reactive] public UInt32 CodeActiveStatementColor { get; set; } = Colors.Yellow.ToUInt32();
 		[Reactive] public UInt32 CodeActiveMidInstructionColor { get; set; } = Color.FromRgb(255, 220, 40).ToUInt32();
 
+		[Reactive] public bool InlineLabelEditEnabled { get; set; } = true;
+
 		[Reactive] public List<int> LabelListColumnWidths { get; set; } = new();
 		[Reactive] public List<int> FunctionListColumnWidths { get; set; } = new();
 		[Reactive] public List<int> BreakpointListColumnWidths { get; set; } = new();

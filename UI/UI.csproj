@@ -389,6 +389,9 @@
     <Compile Update="Debugger\Windows\LabelEditWindow.axaml.cs">
       <DependentUpon>LabelEditWindow.axaml</DependentUpon>
     </Compile>
+    <Compile Update="Debugger\Windows\LabelFindReplaceWindow.axaml.cs">
+      <DependentUpon>LabelFindReplaceWindow.axaml</DependentUpon>
+    </Compile>
     <Compile Update="Debugger\Windows\EventViewerWindow.axaml.cs">
       <DependentUpon>EventViewerWindow.axaml</DependentUpon>
     </Compile>
