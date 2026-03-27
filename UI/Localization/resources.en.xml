@@ -1798,6 +1798,7 @@ E
 		<Message ID="ResetSettingsConfirmation">Warning: This will reset ALL settings and cannot be undone!&#xA;&#xA;Continue?</Message>
 
 		<Message ID="ResetWorkspaceConfirmation">Warning: This operation will empty the watch window, remove all breakpoints and reset labels to their default state.&#xA;&#xA;This resets the workspace of all CPUs for the current ROM.&#xA;&#xA;Are you sure?</Message>
+		<Message ID="DizLoadError">Failed to load DiztinGUIsh project: {0}</Message>
 		<Message ID="ImportLabels">Import completed: {0} labels imported.</Message>
 		<Message ID="ImportLabelsWithErrors">Import completed: {0} labels imported (and {1} errors.)</Message>
 		<Message ID="ImportLabelsWithMissingFiles">Import completed: {0} labels imported.&#xA;&#xA;The following files could not be found:&#xA;{1}</Message>
@@ -3624,6 +3625,7 @@ E
 			<Value ID="ResetWorkspace">Reset workspace</Value>
 			<Value ID="ImportLabels">Import labels...</Value>
 			<Value ID="ExportLabels">Export labels...</Value>
+			<Value ID="ImportDizProject">Import DiztinGUIsh project...</Value>
 			<Value ID="ImportWatchEntries">Import watch entries...</Value>
 			<Value ID="ExportWatchEntries">Export watch entries...</Value>
 

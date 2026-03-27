@@ -829,6 +829,18 @@ namespace Mesen.Debugger.ViewModels
 				ActionType = ActionType.Workspace,
 				SubActions = new() {
 					new ContextMenuAction() {
+						ActionType = ActionType.ImportDizProject,
+						OnClick = async () => {
+							string? filename = await FileDialogHelper.OpenFile(null, wnd, FileDialogHelper.DizExt, FileDialogHelper.DizRawExt);
+							if(filename != null) {
+								DebugWorkspaceManager.LoadSupportedFile(filename, true);
+							}
+						}
+					},
+
+					new ContextMenuSeparator(),
+
+					new ContextMenuAction() {
 						ActionType = ActionType.ImportLabels,
 						Shortcut = () => ConfigManager.Config.Debug.Shortcuts.Get(DebuggerShortcut.ImportLabels),
 						OnClick = async () => {

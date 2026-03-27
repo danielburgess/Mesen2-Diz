@@ -767,6 +767,9 @@ namespace Mesen.Debugger.Utilities
 		ImportLabels,
 		[IconFile("Export")]
 		ExportLabels,
+
+		[IconFile("Import")]
+		ImportDizProject,
 		
 		[IconFile("Import")]
 		ImportWatchEntries,

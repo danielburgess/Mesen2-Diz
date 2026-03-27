@@ -218,6 +218,15 @@ namespace Mesen.Debugger.Utilities
 			}
 		}
 
+		public static void LoadDizFile(string path, bool showResult)
+		{
+			string ext = Path.GetExtension(path).ToLower();
+			if(File.Exists(path) && (ext == "." + FileDialogHelper.DizExt || ext == "." + FileDialogHelper.DizRawExt)) {
+				ResetLabels();
+				Diz.DizWorkspaceLoader.LoadFile(path, showResult);
+			}
+		}
+
 		public static void LoadSupportedFile(string filename, bool showResult)
 		{
 			ISymbolProvider? symbolProvider = SymbolProvider;
@@ -231,6 +240,8 @@ namespace Mesen.Debugger.Utilities
 				case FileDialogHelper.MesenLabelExt: LoadMesenLabelFile(filename, showResult); break;
 				case FileDialogHelper.NesAsmLabelExt: LoadNesAsmLabelFile(filename, showResult); break;
 				case FileDialogHelper.CdlExt: LoadCdlFile(filename); SymbolProvider = symbolProvider; break;
+				case FileDialogHelper.DizExt:
+				case FileDialogHelper.DizRawExt: LoadDizFile(filename, showResult); break;
 			}
 
 			if(SymbolProvider != symbolProvider) {

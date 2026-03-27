@@ -32,6 +32,21 @@ public static class DizToMesenAdapter
     private const int CdlHeaderSize = 9; // 5 magic + 4 CRC32
 
     /// <summary>
+    /// Produce just the per-byte CDL flag array (no file header).
+    ///
+    /// This is the format expected by <c>DebugApi.SetCdlData</c>, which
+    /// operates on raw flag bytes rather than a full .cdl file on disk.
+    /// </summary>
+    public static byte[] ToCdlDataBytes(RomAnnotationStore store)
+    {
+        var bytes  = store.Bytes;
+        var result = new byte[bytes.Length];
+        for (var i = 0; i < bytes.Length; i++)
+            result[i] = ToCdlByte(bytes[i]);
+        return result;
+    }
+
+    /// <summary>
     /// Produce the raw bytes of a Mesen .cdl file.
     ///
     /// File layout (identical to CodeDataLogger::SaveCdlFile):
@@ -43,8 +58,8 @@ public static class DizToMesenAdapter
     /// </summary>
     public static byte[] ToCdlFileBytes(RomAnnotationStore store)
     {
-        var bytes  = store.Bytes;
-        var result = new byte[CdlHeaderSize + bytes.Length];
+        var data   = ToCdlDataBytes(store);
+        var result = new byte[CdlHeaderSize + data.Length];
 
         // Magic
         CdlMagic.CopyTo(result, 0);
@@ -57,8 +72,7 @@ public static class DizToMesenAdapter
         result[8] = (byte)(crc >> 24 & 0xFF);
 
         // Per-byte CDL flags
-        for (var i = 0; i < bytes.Length; i++)
-            result[CdlHeaderSize + i] = ToCdlByte(bytes[i]);
+        data.CopyTo(result, CdlHeaderSize);
 
         return result;
     }

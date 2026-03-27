@@ -163,6 +163,42 @@ public class DizToMesenAdapterTests
         Assert.Equal(0x00, result[9]);
     }
 
+    // ── ToCdlDataBytes ────────────────────────────────────────────────────────
+
+    [Fact]
+    public void ToCdlData_Length_IsByteCountOnly()
+    {
+        var bytes  = new ByteAnnotation[42];
+        var store  = MakeStore(bytes: bytes);
+        var result = DizToMesenAdapter.ToCdlDataBytes(store);
+        Assert.Equal(42, result.Length); // no header
+    }
+
+    [Fact]
+    public void ToCdlData_Opcode_IsCdlCode()
+    {
+        var bytes  = new[] { new ByteAnnotation { Type = ByteType.Opcode } };
+        var result = DizToMesenAdapter.ToCdlDataBytes(MakeStore(bytes: bytes));
+        Assert.Equal(0x01, result[0]);
+    }
+
+    [Fact]
+    public void ToCdlData_FlagsMatchFileBytes_AfterStrippingHeader()
+    {
+        // ToCdlDataBytes and ToCdlFileBytes[header..] must agree byte-for-byte.
+        var bytes = new[]
+        {
+            new ByteAnnotation { Type = ByteType.Opcode, MFlag = true },
+            new ByteAnnotation { Type = ByteType.Data8 },
+            new ByteAnnotation { Type = ByteType.Unreached },
+        };
+        var store    = MakeStore(bytes: bytes);
+        var dataOnly = DizToMesenAdapter.ToCdlDataBytes(store);
+        var file     = DizToMesenAdapter.ToCdlFileBytes(store);
+        for (var i = 0; i < dataOnly.Length; i++)
+            Assert.Equal(dataOnly[i], file[9 + i]);
+    }
+
     // ══════════════════════════════════════════════════════════════════════════
     // MLB
     // ══════════════════════════════════════════════════════════════════════════
