@@ -205,10 +205,9 @@ public class SnesAddressConverterTests
     // ── Unsupported modes ─────────────────────────────────────────────────────
 
     [Theory]
-    [InlineData(RomMapMode.ExHiRom)]
-    [InlineData(RomMapMode.Sa1Rom)]
     [InlineData(RomMapMode.SuperFx)]
-    [InlineData(RomMapMode.ExLoRom)]
+    [InlineData(RomMapMode.SuperMmc)]
+    [InlineData(RomMapMode.ExSa1Rom)]
     public void UnsupportedMode_ToOffset_Throws(RomMapMode mode)
     {
         Assert.Throws<NotSupportedException>(() =>
@@ -216,11 +215,128 @@ public class SnesAddressConverterTests
     }
 
     [Theory]
-    [InlineData(RomMapMode.ExHiRom)]
-    [InlineData(RomMapMode.Sa1Rom)]
+    [InlineData(RomMapMode.SuperFx)]
+    [InlineData(RomMapMode.SuperMmc)]
+    [InlineData(RomMapMode.ExSa1Rom)]
     public void UnsupportedMode_ToSnes_Throws(RomMapMode mode)
     {
         Assert.Throws<NotSupportedException>(() =>
             SnesAddressConverter.TryToSnesAddress(0, 0x100000, mode, out _));
+    }
+
+    // ── ExHiRom → ROM offset ──────────────────────────────────────────────────
+
+    [Fact]
+    public void ExHiRom_BankC0_0000_MapsTo_Offset0()
+    {
+        Assert.True(SnesAddressConverter.TryToRomOffset(0xC00000, RomMapMode.ExHiRom, out var off));
+        Assert.Equal(0, off);
+    }
+
+    [Fact]
+    public void ExHiRom_BankFF_FFFF_MapsTo_Offset3FFFFF()
+    {
+        Assert.True(SnesAddressConverter.TryToRomOffset(0xFFFFFF, RomMapMode.ExHiRom, out var off));
+        Assert.Equal(0x3FFFFF, off);
+    }
+
+    [Fact]
+    public void ExHiRom_Bank40_0000_MapsTo_Offset400000()
+    {
+        // Second half: banks 40–7D start at 0x400000.
+        Assert.True(SnesAddressConverter.TryToRomOffset(0x400000, RomMapMode.ExHiRom, out var off));
+        Assert.Equal(0x400000, off);
+    }
+
+    [Fact]
+    public void ExHiRom_Bank7D_FFFF_MapsTo_Offset7DFFFF()
+    {
+        Assert.True(SnesAddressConverter.TryToRomOffset(0x7DFFFF, RomMapMode.ExHiRom, out var off));
+        Assert.Equal(0x7DFFFF, off);
+    }
+
+    [Fact]
+    public void ExHiRom_Mirror80_SameAsC0()
+    {
+        // Bank 80 page 8000 mirrors bank C0 page 8000.
+        SnesAddressConverter.TryToRomOffset(0xC08000, RomMapMode.ExHiRom, out var offC0);
+        SnesAddressConverter.TryToRomOffset(0x808000, RomMapMode.ExHiRom, out var off80);
+        Assert.Equal(offC0, off80);
+    }
+
+    [Fact]
+    public void ExHiRom_Mirror00_SameAs40()
+    {
+        // Bank 00 page 8000 mirrors bank 40 page 8000.
+        SnesAddressConverter.TryToRomOffset(0x408000, RomMapMode.ExHiRom, out var off40);
+        SnesAddressConverter.TryToRomOffset(0x008000, RomMapMode.ExHiRom, out var off00);
+        Assert.Equal(off40, off00);
+    }
+
+    [Fact]
+    public void ExHiRom_Bank80_PageBelow8000_ReturnsFalse()
+    {
+        Assert.False(SnesAddressConverter.TryToRomOffset(0x807FFF, RomMapMode.ExHiRom, out _));
+    }
+
+    [Fact]
+    public void ExHiRom_Bank00_PageBelow8000_ReturnsFalse()
+    {
+        Assert.False(SnesAddressConverter.TryToRomOffset(0x007FFF, RomMapMode.ExHiRom, out _));
+    }
+
+    [Fact]
+    public void ExHiRom_WramBank7E_ReturnsFalse()
+    {
+        Assert.False(SnesAddressConverter.TryToRomOffset(0x7E0000, RomMapMode.ExHiRom, out _));
+    }
+
+    [Theory]
+    [InlineData(0x000000)]
+    [InlineData(0x3FFFFF)]
+    [InlineData(0x400000)]
+    [InlineData(0x7DFFFF)]
+    public void ExHiRom_RoundTrip_Offset(int romOffset)
+    {
+        int romSize = 0x800000; // 8 MB
+        Assert.True(SnesAddressConverter.TryToSnesAddress(romOffset, romSize, RomMapMode.ExHiRom, out var snes));
+        Assert.True(SnesAddressConverter.TryToRomOffset(snes, RomMapMode.ExHiRom, out var back));
+        Assert.Equal(romOffset, back);
+    }
+
+    // ── ExLoRom — uses LoRom formula ──────────────────────────────────────────
+
+    [Fact]
+    public void ExLoRom_Bank00_8000_MapsTo_Offset0()
+    {
+        Assert.True(SnesAddressConverter.TryToRomOffset(0x008000, RomMapMode.ExLoRom, out var off));
+        Assert.Equal(0, off);
+    }
+
+    [Fact]
+    public void ExLoRom_RoundTrip()
+    {
+        int romSize = 0x400000;
+        Assert.True(SnesAddressConverter.TryToSnesAddress(0x18000, romSize, RomMapMode.ExLoRom, out var snes));
+        Assert.True(SnesAddressConverter.TryToRomOffset(snes, RomMapMode.ExLoRom, out var back));
+        Assert.Equal(0x18000, back);
+    }
+
+    // ── Sa1Rom — uses LoRom formula ───────────────────────────────────────────
+
+    [Fact]
+    public void Sa1Rom_Bank00_8000_MapsTo_Offset0()
+    {
+        Assert.True(SnesAddressConverter.TryToRomOffset(0x008000, RomMapMode.Sa1Rom, out var off));
+        Assert.Equal(0, off);
+    }
+
+    [Fact]
+    public void Sa1Rom_RoundTrip()
+    {
+        int romSize = 0x400000;
+        Assert.True(SnesAddressConverter.TryToSnesAddress(0x8000, romSize, RomMapMode.Sa1Rom, out var snes));
+        Assert.True(SnesAddressConverter.TryToRomOffset(snes, RomMapMode.Sa1Rom, out var back));
+        Assert.Equal(0x8000, back);
     }
 }

@@ -242,8 +242,17 @@ namespace Mesen.Debugger.Diz
 		{
 			gameName = h.title;
 			speed    = (h.mapModeByte & 0x10) != 0 ? RomSpeed.FastRom : RomSpeed.SlowRom;
-			mapMode  = (h.mapModeByte & 0x0F) switch {
+			mapMode  = MapModeFromByte(h.mapModeByte);
+		}
+
+		// Match Mesen's detection logic from BaseCartridge.cpp LoadRom().
+		private static RomMapMode MapModeFromByte(byte b)
+		{
+			if((b & 0x27) == 0x25) return RomMapMode.ExHiRom;   // 0x25 or 0x35
+			if((b & 0x27) == 0x22) return RomMapMode.ExLoRom;   // 0x22 or 0x32
+			return (b & 0x0F) switch {
 				0x01 => RomMapMode.HiRom,
+				0x03 => RomMapMode.Sa1Rom,
 				_    => RomMapMode.LoRom,
 			};
 		}

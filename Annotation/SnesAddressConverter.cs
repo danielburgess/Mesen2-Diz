@@ -1,7 +1,8 @@
 namespace Mesen.Annotation;
 
 /// <summary>
-/// Pure SNES address ↔ SnesPrgRom offset translation for LoRom and HiRom.
+/// Pure SNES address ↔ SnesPrgRom offset translation for LoRom, HiRom,
+/// ExHiRom, ExLoRom, and Sa1Rom.
 ///
 /// Formulas are derived directly from Mesen's BaseCartridge.cpp memory-map
 /// registration and RamHandler::GetAbsoluteAddress, so the results are
@@ -22,7 +23,8 @@ public static class SnesAddressConverter
     /// (WRAM, hardware registers, SaveRam, unmapped).
     /// </summary>
     /// <exception cref="NotSupportedException">
-    /// Thrown for map modes other than LoRom and HiRom.
+    /// Thrown for map modes that are not yet implemented
+    /// (SuperFx, SuperMmc, ExSa1Rom).
     /// </exception>
     public static bool TryToRomOffset(int snesAddress, RomMapMode mapMode, out int romOffset)
     {
@@ -32,8 +34,13 @@ public static class SnesAddressConverter
 
         return mapMode switch
         {
-            RomMapMode.LoRom  => TryLoRomToOffset(bank, page, out romOffset),
-            RomMapMode.HiRom  => TryHiRomToOffset(bank, page, out romOffset),
+            RomMapMode.LoRom   => TryLoRomToOffset(bank, page, out romOffset),
+            RomMapMode.HiRom   => TryHiRomToOffset(bank, page, out romOffset),
+            RomMapMode.ExHiRom => TryExHiRomToOffset(bank, page, out romOffset),
+            // ExLoRom uses the LoRom formula — same RegisterHandler calls in Mesen.
+            RomMapMode.ExLoRom => TryLoRomToOffset(bank, page, out romOffset),
+            // SA-1 games are LoRom from the SNES CPU's perspective.
+            RomMapMode.Sa1Rom  => TryLoRomToOffset(bank, page, out romOffset),
             _ => throw new NotSupportedException(
                      $"RomMapMode.{mapMode} address translation is not yet implemented.")
         };
@@ -43,14 +50,17 @@ public static class SnesAddressConverter
     /// Convert a SnesPrgRom ROM offset back to the canonical SNES address.
     ///
     /// Canonical addresses:
-    ///   LoRom  — lowest bank in range 00–7D, page 8000+
-    ///   HiRom  — lowest bank in range 40–7D, page 0000+
+    ///   LoRom/ExLoRom/Sa1Rom — lowest bank in range 00–7D, page 8000+
+    ///   HiRom                — lowest bank in range 40–7D, page 0000+
+    ///   ExHiRom              — banks C0–FF for offset &lt; 0x400000,
+    ///                          banks 40–7D for offset ≥ 0x400000
     ///
     /// Returns <c>false</c> when <paramref name="romOffset"/> is out of range
     /// for the given <paramref name="romSizeBytes"/>.
     /// </summary>
     /// <exception cref="NotSupportedException">
-    /// Thrown for map modes other than LoRom and HiRom.
+    /// Thrown for map modes that are not yet implemented
+    /// (SuperFx, SuperMmc, ExSa1Rom).
     /// </exception>
     public static bool TryToSnesAddress(
         int romOffset, int romSizeBytes, RomMapMode mapMode, out int snesAddress)
@@ -61,8 +71,11 @@ public static class SnesAddressConverter
 
         return mapMode switch
         {
-            RomMapMode.LoRom  => TryLoRomToSnes(romOffset, out snesAddress),
-            RomMapMode.HiRom  => TryHiRomToSnes(romOffset, out snesAddress),
+            RomMapMode.LoRom   => TryLoRomToSnes(romOffset, out snesAddress),
+            RomMapMode.HiRom   => TryHiRomToSnes(romOffset, out snesAddress),
+            RomMapMode.ExHiRom => TryExHiRomToSnes(romOffset, out snesAddress),
+            RomMapMode.ExLoRom => TryLoRomToSnes(romOffset, out snesAddress),
+            RomMapMode.Sa1Rom  => TryLoRomToSnes(romOffset, out snesAddress),
             _ => throw new NotSupportedException(
                      $"RomMapMode.{mapMode} address translation is not yet implemented.")
         };
@@ -79,6 +92,8 @@ public static class SnesAddressConverter
     // Each bank 8-page window (8000–FFFF) maps to 8 consecutive handlers.
     //
     // Therefore: romOffset = (bank % 0x80) * 0x8000 + (page & 0x7FFF)
+    //
+    // Also used for ExLoRom (same handlers) and Sa1Rom (LoRom from SNES CPU view).
 
     private static bool TryLoRomToOffset(int bank, int page, out int romOffset)
     {
@@ -127,8 +142,8 @@ public static class SnesAddressConverter
 
         int bankLo = bank & 0x3F;   // strip mirror bit
 
-        bool isFullBank   = bank is (>= 0x40 and <= 0x7D) or (>= 0xC0 and <= 0xFF);
-        bool isHalfBank   = bank is (>= 0x00 and <= 0x3F) or (>= 0x80 and <= 0xBF);
+        bool isFullBank = bank is (>= 0x40 and <= 0x7D) or (>= 0xC0 and <= 0xFF);
+        bool isHalfBank = bank is (>= 0x00 and <= 0x3F) or (>= 0x80 and <= 0xBF);
 
         if (isHalfBank && page < 0x8000)
             return false;
@@ -149,6 +164,63 @@ public static class SnesAddressConverter
         if (bank > 0x7D)
             bank = 0xC0 + (romOffset / 0x10000) % 0x40;
         int page = romOffset % 0x10000;
+        snesAddress = (bank << 16) | page;
+        return true;
+    }
+
+    // ── ExHiRom ───────────────────────────────────────────────────────────────
+    //
+    // BaseCartridge.cpp:
+    //   // First half (offsets 0x000000–0x3FFFFF):
+    //   mm.RegisterHandler(0xC0, 0xFF, 0x0000, 0xFFFF, _prgRomHandlers, 0);      // primary
+    //   mm.RegisterHandler(0x80, 0xBF, 0x8000, 0xFFFF, _prgRomHandlers, 8);      // mirror
+    //   // Second half (offsets 0x400000+):
+    //   mm.RegisterHandler(0x40, 0x7D, 0x0000, 0xFFFF, _prgRomHandlers, 0, 0x400);  // primary
+    //   mm.RegisterHandler(0x00, 0x3F, 0x8000, 0xFFFF, _prgRomHandlers, 8, 0x400);  // mirror
+    //
+    // Derived formulas:
+    //   banks C0–FF and mirrors 80–BF: romOffset = (bank & 0x3F) * 0x10000 + page
+    //   banks 40–7D and mirrors 00–3F: romOffset = 0x400000 + (bank & 0x3F) * 0x10000 + page
+    //
+    // Validity:
+    //   banks 80–BF and 00–3F: only pages 8000–FFFF are ROM (upper half only)
+    //   banks C0–FF and 40–7D: all pages are ROM
+    //   banks 7E–7F: always WRAM
+
+    private static bool TryExHiRomToOffset(int bank, int page, out int romOffset)
+    {
+        romOffset = 0;
+        if (bank == 0x7E || bank == 0x7F) return false;
+
+        if (bank >= 0x80)
+        {
+            // Banks 80–BF: upper half only; banks C0–FF: all pages.
+            if (bank <= 0xBF && page < 0x8000) return false;
+            romOffset = (bank & 0x3F) * 0x10000 + page;
+            return true;
+        }
+
+        // Banks 00–3F: upper half only; banks 40–7D: all pages.
+        if (bank <= 0x3F && page < 0x8000) return false;
+        romOffset = 0x400000 + (bank & 0x3F) * 0x10000 + page;
+        return true;
+    }
+
+    private static bool TryExHiRomToSnes(int romOffset, out int snesAddress)
+    {
+        int bank, page;
+        if (romOffset < 0x400000)
+        {
+            // Canonical: banks C0–FF (full-bank primary region).
+            bank = 0xC0 + romOffset / 0x10000;
+            page = romOffset % 0x10000;
+        }
+        else
+        {
+            // Canonical: banks 40–7D (full-bank primary region for second half).
+            bank = 0x40 + (romOffset - 0x400000) / 0x10000;
+            page = (romOffset - 0x400000) % 0x10000;
+        }
         snesAddress = (bank << 16) | page;
         return true;
     }
