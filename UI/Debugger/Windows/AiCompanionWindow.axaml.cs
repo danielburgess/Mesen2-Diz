@@ -7,6 +7,7 @@ using Mesen.Config;
 using Mesen.Debugger.AI;
 using Mesen.Debugger.ViewModels;
 using Mesen.Interop;
+using Mesen.Utilities;
 using Mesen.Windows;
 using System;
 
@@ -65,7 +66,14 @@ namespace Mesen.Debugger.Windows
 				_model.SendCommand.Execute().Subscribe();
 		}
 
-		public void OnAnalyzeClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+		private async void OnLoadContextClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+	{
+		string? path = await FileDialogHelper.OpenFile(null, this, "txt", "md", "*");
+		if(path != null)
+			_model.LoadContextFile(path);
+	}
+
+	public void OnAnalyzeClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
 		{
 			if(sender is Button btn && btn.Tag is Mesen.Debugger.AI.ReviewQueueItem item)
 				_model.AnalyzeQueueItemCommand.Execute(item).Subscribe();

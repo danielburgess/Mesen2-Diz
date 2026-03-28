@@ -13,7 +13,7 @@ namespace Mesen.Config
 	public class AiCompanionConfig : BaseWindowConfig<AiCompanionConfig>
 	{
 		[Reactive] public string ApiKey { get; set; } = "";
-		[Reactive] public string Model { get; set; } = "claude-haiku-4-5-20251001";
+		[Reactive] public string Model { get; set; } = "claude-sonnet-4-6";
 		public List<string> Models { get; set; } = new() {
 			"claude-haiku-4-5-20251001",
 			"claude-sonnet-4-6",

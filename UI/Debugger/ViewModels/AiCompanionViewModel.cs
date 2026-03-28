@@ -43,6 +43,7 @@ namespace Mesen.Debugger.ViewModels
 		[Reactive] public bool IsBusy { get; private set; }
 		[Reactive] public string InputText { get; set; } = "";
 		[Reactive] public string StatusText { get; private set; } = "Ready";
+		[Reactive] public string ContextStatusText { get; private set; } = "no context";
 		[Reactive] public bool ReviewQueueHasItems { get; private set; }
 		[Reactive] public bool ChatScrollLocked { get; set; } = true;
 
@@ -139,6 +140,7 @@ namespace Mesen.Debugger.ViewModels
 			try {
 				_contextText = File.ReadAllText(path);
 				Config.ContextFilePath = path;
+				ContextStatusText = $"ctx: {Path.GetFileName(path)}";
 				AddSystemMessage($"Context file loaded: {Path.GetFileName(path)} ({_contextText.Length} chars)");
 			} catch(Exception ex) {
 				AddSystemMessage($"Could not load context file: {ex.Message}");
@@ -149,6 +151,7 @@ namespace Mesen.Debugger.ViewModels
 		{
 			_contextText = "";
 			Config.ContextFilePath = "";
+			ContextStatusText = "no context";
 			AddSystemMessage("Context file cleared.");
 		}
 
@@ -159,6 +162,7 @@ namespace Mesen.Debugger.ViewModels
 			if(!string.IsNullOrEmpty(configured) && File.Exists(configured)) {
 				try {
 					_contextText = File.ReadAllText(configured);
+					ContextStatusText = $"ctx: {Path.GetFileName(configured)}";
 					AddSystemMessage($"Context file loaded: {Path.GetFileName(configured)} ({_contextText.Length} chars)");
 					return;
 				} catch { }
@@ -169,12 +173,14 @@ namespace Mesen.Debugger.ViewModels
 			if(!string.IsNullOrEmpty(auto) && File.Exists(auto)) {
 				try {
 					_contextText = File.ReadAllText(auto);
+					ContextStatusText = $"ctx: {Path.GetFileName(auto)}";
 					AddSystemMessage($"Context file auto-loaded: {Path.GetFileName(auto)} ({_contextText.Length} chars)");
 					return;
 				} catch { }
 			}
 
 			_contextText = "";
+			ContextStatusText = "no context";
 		}
 
 		// ── History Persistence ───────────────────────────────────────────────

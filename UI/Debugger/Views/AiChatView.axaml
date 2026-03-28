@@ -12,7 +12,7 @@
 >
 	<DockPanel>
 
-		<!-- Header bar: monitor + context + clear -->
+		<!-- Header bar: monitor + context status + model label + clear -->
 		<Border DockPanel.Dock="Top"
 			BorderThickness="0,0,0,1"
 			BorderBrush="{StaticResource MesenBorderColor}"
@@ -23,17 +23,17 @@
 				<c:EnumComboBox Grid.Column="1"
 					SelectedItem="{Binding Config.MonitoringMode}"
 					FontSize="11" />
-				<Button Grid.Column="2" Margin="4,0,0,0" Padding="6,2"
-					Click="OnLoadContextClick"
-					ToolTip.Tip="Load a text file to include as context in every prompt (memory map, known addresses, notes...)">
-					<TextBlock Text="Context..." FontSize="11" />
-				</Button>
-				<Button Grid.Column="3" Margin="2,0,0,0" Padding="6,2"
-					Command="{Binding ClearContextCommand}"
-					IsVisible="{Binding Config.ContextFilePath, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-					ToolTip.Tip="Clear loaded context file">
-					<TextBlock Text="✕ ctx" FontSize="11" />
-				</Button>
+				<TextBlock Grid.Column="2" Margin="6,0,0,0" FontSize="11"
+					VerticalAlignment="Center"
+					Text="{Binding ContextStatusText}"
+					Foreground="{StaticResource MesenTextMutedColor}"
+					FontStyle="Italic"
+					ToolTip.Tip="Context file status — load or clear in Settings" />
+				<TextBlock Grid.Column="3" Margin="6,0,0,0" FontSize="11"
+					VerticalAlignment="Center"
+					Text="{Binding Config.Model}"
+					Foreground="{StaticResource MesenTextMutedColor}"
+					ToolTip.Tip="Active model — change in Settings" />
 				<Button Grid.Column="4" Margin="4,0,0,0" Padding="6,2"
 					Command="{Binding ClearCommand}"
 					ToolTip.Tip="Clear chat history">
