@@ -880,4 +880,56 @@ public class SnesAsmExporterTests
         var result = SnesAsmExporter.Export(MakeStore(ann), paddedRom);
         Assert.Contains(mnemonic, result);
     }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Label assignment fallback for labels at unvisited offsets
+    // ══════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Export_UserLabelAtOperandByte_EmittedAsAssignment()
+    {
+        // JSL abs.long (opcode $22, 3 operand bytes) at offset 0 → emits size 4.
+        // Offset 2 is an operand byte; user has placed a label there.
+        // The main loop never visits offset 2, so the label must become an assignment.
+        // JSL $808080 → bytes: 22 80 80 80
+        var bytes = new byte[] { 0x22, 0x80, 0x80, 0x80, 0xEA };
+        var store = MakeStore(
+            [Op(), Opr(), Opr(), Opr(), Op()],
+            labels: new() { [0x808082] = "myTable" });  // offset 2 = SNES $808082
+
+        var result = SnesAsmExporter.Export(store, bytes);
+
+        // Should NOT be a positional label (offset 2 is never the loop entry point).
+        Assert.DoesNotContain("myTable:", result);
+        // Should appear as an address assignment.
+        Assert.Contains("myTable = $", result);
+    }
+
+    [Fact]
+    public void Export_SynthLabelAtSkippedOffset_EmittedAsAssignment()
+    {
+        // Simulates the BuildStoreFromMesen case: all code bytes are Opcode,
+        // so an operand byte of JSL gets a synth CODE_ label from a BNE branch,
+        // but the main loop skips it.
+        //
+        // Layout (LoRom, all bytes Opcode):
+        //   offset 0: BNE rel8 → target offset 4 (SNES $808004)
+        //   offset 1: rel8 operand (value 0x02 → target = $808004)
+        //   offset 2: JSL abs.long (opcode $22, 3-byte operand) — fills offsets 3,4,5
+        //   offset 3: JSL opr byte 0
+        //   offset 4: JSL opr byte 1  ← BNE target; synth label CODE_808004 generated
+        //   offset 5: JSL opr byte 2
+        //   offset 6: NOP
+        //
+        // With all bytes as Opcode, the loop processes 0 (BNE, size 2), then 2 (JSL, size 4),
+        // then 6 (NOP, size 1). Offset 4 is never visited → CODE_808004 must be assignment.
+        var bytes = new byte[] { 0xD0, 0x02, 0x22, 0x00, 0x00, 0x80, 0xEA };
+        var store = MakeStore([Op(), Op(), Op(), Op(), Op(), Op(), Op()]);
+
+        var result = SnesAsmExporter.Export(store, bytes);
+
+        Assert.DoesNotContain("CODE_808004:", result);
+        Assert.Contains("CODE_808004 = $808004", result);
+        Assert.Contains("BNE CODE_808004", result);
+    }
 }

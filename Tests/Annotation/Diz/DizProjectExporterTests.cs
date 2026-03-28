@@ -78,6 +78,30 @@ public class DizProjectExporterTests
     }
 
     [Fact]
+    public void Export_RootHasDefaultClrNamespace()
+    {
+        // DiztinGUIsh's ExtendedXmlSerializer locates root type via
+        // xmlns="clr-namespace:Diz.Core.serialization.xml_serializer;assembly=Diz.Core"
+        var xml = DizProjectExporter.Export(MinimalStore());
+        Assert.Contains("xmlns=\"clr-namespace:Diz.Core.serialization.xml_serializer;assembly=Diz.Core\"", xml);
+    }
+
+    [Fact]
+    public void Export_HasXmlDeclaration()
+    {
+        var xml = DizProjectExporter.Export(MinimalStore());
+        Assert.StartsWith("<?xml version=\"1.0\" encoding=\"utf-8\"?>", xml);
+    }
+
+    [Fact]
+    public void Export_HasExtra1Extra2Attributes()
+    {
+        var xml = DizProjectExporter.Export(MinimalStore());
+        Assert.Contains("Extra1=\"\"", xml);
+        Assert.Contains("Extra2=\"\"", xml);
+    }
+
+    [Fact]
     public void Export_IsValidXml()
     {
         var xml = DizProjectExporter.Export(MinimalStore());

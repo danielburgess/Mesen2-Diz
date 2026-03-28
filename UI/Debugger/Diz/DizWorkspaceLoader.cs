@@ -204,10 +204,7 @@ namespace Mesen.Debugger.Diz
 			// Read the full PRG ROM to parse the SNES internal header.
 			byte[] romBytes = DebugApi.GetMemoryState(memType);
 
-			TryDetectSnesHeader(romBytes, out RomMapMode mapMode, out RomSpeed speed, out string gameName);
-
-			// Get CRC32 from the CDL file Mesen already computed.
-			uint checksum = GetRomChecksumFromCdl(memType);
+			TryDetectSnesHeader(romBytes, out RomMapMode mapMode, out RomSpeed speed, out string gameName, out uint checksum);
 
 			// Build ByteAnnotation[] from live CDL flags.
 			CdlFlags[] cdlFlags = DebugApi.GetCdlData(0, (uint)liveSize, memType);
@@ -274,12 +271,13 @@ namespace Mesen.Debugger.Diz
 		// Validation: (checksum + complement) & 0xFFFF == 0xFFFF
 
 		private static void TryDetectSnesHeader(byte[] rom,
-			out RomMapMode mapMode, out RomSpeed speed, out string gameName)
+			out RomMapMode mapMode, out RomSpeed speed, out string gameName, out uint dizChecksum)
 		{
 			// Default fallback.
-			mapMode  = RomMapMode.LoRom;
-			speed    = RomSpeed.SlowRom;
-			gameName = "";
+			mapMode     = RomMapMode.LoRom;
+			speed       = RomSpeed.SlowRom;
+			gameName    = "";
+			dizChecksum = 0;
 
 			bool loValid = TryReadHeader(rom, 0x7FC0, out var lo);
 			bool hiValid = TryReadHeader(rom, 0xFFC0, out var hi);
@@ -287,21 +285,22 @@ namespace Mesen.Debugger.Diz
 			// Prefer the candidate whose map mode byte matches the header location.
 			// LoRom map mode bits 0-3 == 0; HiRom == 1.
 			if(loValid && (!hiValid || (lo.mapModeByte & 0x0F) == 0x00)) {
-				Apply(lo, out mapMode, out speed, out gameName);
+				Apply(lo, out mapMode, out speed, out gameName, out dizChecksum);
 			} else if(hiValid) {
-				Apply(hi, out mapMode, out speed, out gameName);
+				Apply(hi, out mapMode, out speed, out gameName, out dizChecksum);
 			} else if(loValid) {
-				Apply(lo, out mapMode, out speed, out gameName);
+				Apply(lo, out mapMode, out speed, out gameName, out dizChecksum);
 			}
 		}
 
 		private static void Apply(
-			(string title, byte mapModeByte) h,
-			out RomMapMode mapMode, out RomSpeed speed, out string gameName)
+			(string title, byte mapModeByte, uint dizChecksum) h,
+			out RomMapMode mapMode, out RomSpeed speed, out string gameName, out uint dizChecksum)
 		{
-			gameName = h.title;
-			speed    = (h.mapModeByte & 0x10) != 0 ? RomSpeed.FastRom : RomSpeed.SlowRom;
-			mapMode  = MapModeFromByte(h.mapModeByte);
+			gameName    = h.title;
+			speed       = (h.mapModeByte & 0x10) != 0 ? RomSpeed.FastRom : RomSpeed.SlowRom;
+			mapMode     = MapModeFromByte(h.mapModeByte);
+			dizChecksum = h.dizChecksum;
 		}
 
 		// Match Mesen's detection logic from BaseCartridge.cpp LoadRom().
@@ -317,7 +316,7 @@ namespace Mesen.Debugger.Diz
 		}
 
 		private static bool TryReadHeader(byte[] rom, int titleOffset,
-			out (string title, byte mapModeByte) result)
+			out (string title, byte mapModeByte, uint dizChecksum) result)
 		{
 			result = default;
 			int end = titleOffset + 0x20; // need at least 32 bytes past title start
@@ -327,6 +326,9 @@ namespace Mesen.Debugger.Diz
 			ushort checksum   = (ushort)(rom[titleOffset + 0x1E] | rom[titleOffset + 0x1F] << 8);
 			if(((complement + checksum) & 0xFFFF) != 0xFFFF) return false;
 
+			// DiztinGUIsh InternalCheckSum = (checksumWord << 16) | complementWord
+			uint dizChecksum = ((uint)checksum << 16) | complement;
+
 			// Decode ASCII title (trim trailing spaces/nulls).
 			var sb = new StringBuilder(21);
 			for(int i = 0; i < 21; i++) {
@@ -334,27 +336,8 @@ namespace Mesen.Debugger.Diz
 				if(b == 0) break;
 				sb.Append(b >= 0x20 && b < 0x80 ? (char)b : '?');
 			}
-			result = (sb.ToString().TrimEnd(), rom[titleOffset + 0x15]);
+			result = (sb.ToString().TrimEnd(), rom[titleOffset + 0x15], dizChecksum);
 			return true;
-		}
-
-		// ── CRC32 from CDL ────────────────────────────────────────────────────
-
-		private static uint GetRomChecksumFromCdl(MemoryType memType)
-		{
-			// Save a temporary CDL file; read the 4-byte CRC32 from bytes 5–8.
-			string tmp = Path.GetTempFileName();
-			try {
-				DebugApi.SaveCdlFile(memType, tmp);
-				using var f = File.OpenRead(tmp);
-				var header = new byte[9];
-				if(f.Read(header, 0, 9) < 9) return 0;
-				return (uint)(header[5] | header[6] << 8 | header[7] << 16 | header[8] << 24);
-			} catch {
-				return 0;
-			} finally {
-				try { File.Delete(tmp); } catch { }
-			}
 		}
 
 		// ── File I/O ──────────────────────────────────────────────────────────
@@ -372,13 +355,14 @@ namespace Mesen.Debugger.Diz
 
 		private static void WriteDizFile(string path, string xml)
 		{
+			var utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 			if(Path.GetExtension(path).Equals("." + FileDialogHelper.DizExt, StringComparison.OrdinalIgnoreCase)) {
 				using var fs = File.Create(path);
 				using var gz = new GZipStream(fs, CompressionLevel.Optimal);
-				using var w  = new StreamWriter(gz, Encoding.UTF8);
+				using var w  = new StreamWriter(gz, utf8NoBom);
 				w.Write(xml);
 			} else {
-				File.WriteAllText(path, xml, Encoding.UTF8);
+				File.WriteAllText(path, xml, utf8NoBom);
 			}
 		}
 	}

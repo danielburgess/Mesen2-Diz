@@ -106,7 +106,7 @@
 
 									<!-- Assistant message: left-aligned, monospace -->
 									<Border IsVisible="{Binding IsAssistant}"
-										Background="{StaticResource MesenGrayColor}"
+										Background="{StaticResource MesenGreenColor}"
 										CornerRadius="6" Padding="8,5"
 										HorizontalAlignment="Left" MaxWidth="560">
 										<StackPanel>

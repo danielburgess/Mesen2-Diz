@@ -110,8 +110,20 @@ namespace Mesen.Debugger.AI
 							}
 						}
 					});
-					await StreamOneRequest(
+					var (summaryParts, _, _) = await StreamOneRequest(
 						apiKey, model, maxTokens, systemPrompt, TrimHistory(messages, maxHistoryTurns), new List<JsonObject>(), onTextDelta, ct);
+					// Record the summary so the next turn doesn't see an orphaned user message
+					if(summaryParts.Count > 0) {
+						messages.Add(new JsonObject {
+							["role"] = "assistant",
+							["content"] = new JsonArray {
+								(JsonNode)new JsonObject {
+									["type"] = "text",
+									["text"] = string.Join("", summaryParts)
+								}
+							}
+						});
+					}
 					break;
 				}
 				// Loop: send again with tool results
@@ -146,13 +158,27 @@ namespace Mesen.Debugger.AI
 				["tools"] = CloneArray(tools)
 			};
 
-			using var request = new HttpRequestMessage(HttpMethod.Post, ApiUrl);
-			request.Headers.Add("x-api-key", apiKey);
-			request.Headers.Add("anthropic-version", ApiVersion);
-			request.Headers.Add("anthropic-beta", "prompt-caching-2024-07-31");
-			request.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
+			string bodyJson = body.ToJsonString();
 
-			using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+			// Retry with backoff on 429 rate-limit errors
+			HttpResponseMessage response;
+			int[] retryDelays = { 5, 10, 20, 40 };
+			int attempt = 0;
+			while(true) {
+				using var request = new HttpRequestMessage(HttpMethod.Post, ApiUrl);
+				request.Headers.Add("x-api-key", apiKey);
+				request.Headers.Add("anthropic-version", ApiVersion);
+				request.Headers.Add("anthropic-beta", "prompt-caching-2024-07-31");
+				request.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
+				response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+				if((int)response.StatusCode != 429 || attempt >= retryDelays.Length) break;
+				response.Dispose();
+				int delaySecs = retryDelays[attempt++];
+				onTextDelta($"\n[Rate limited — retrying in {delaySecs}s...]");
+				await Task.Delay(delaySecs * 1000, ct);
+			}
+
+			using(response) {
 
 			if(!response.IsSuccessStatusCode) {
 				var errorBody = await response.Content.ReadAsStringAsync(ct);
@@ -242,15 +268,37 @@ namespace Mesen.Debugger.AI
 			}
 
 			return (textParts, toolUseList, stopReason);
+
+			} // end using(response)
 		}
 
-		/// <summary>Returns the last <paramref name="maxTurns"/> user/assistant pairs from history.</summary>
+		/// <summary>
+		/// Returns recent history trimmed to at most <paramref name="maxTurns"/> real user turns.
+		/// Trims only at turn-start boundaries (regular user messages, not tool_result messages)
+		/// so that tool_use/tool_result pairs are never split across the trim point.
+		/// </summary>
 		private static List<JsonObject> TrimHistory(List<JsonObject> messages, int maxTurns)
 		{
-			if(maxTurns <= 0 || messages.Count <= maxTurns * 2)
+			if(maxTurns <= 0)
 				return messages;
-			// Keep the most recent maxTurns*2 messages (each turn = user + assistant)
-			return messages.GetRange(messages.Count - maxTurns * 2, maxTurns * 2);
+
+			// Collect indices of "real" user turn starts — user messages that are NOT tool_results
+			var turnStarts = new List<int>();
+			for(int i = 0; i < messages.Count; i++) {
+				var msg = messages[i];
+				if(msg["role"]?.GetValue<string>() == "user") {
+					bool isToolResult = msg["content"] is JsonArray arr && arr.Count > 0 &&
+						(arr[0] as JsonObject)?["type"]?.GetValue<string>() == "tool_result";
+					if(!isToolResult)
+						turnStarts.Add(i);
+				}
+			}
+
+			if(turnStarts.Count <= maxTurns)
+				return messages;
+
+			int startIdx = turnStarts[turnStarts.Count - maxTurns];
+			return messages.GetRange(startIdx, messages.Count - startIdx);
 		}
 
 		private static JsonArray CloneArray(List<JsonObject> items)

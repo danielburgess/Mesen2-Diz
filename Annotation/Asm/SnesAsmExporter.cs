@@ -74,6 +74,10 @@ public static class SnesAsmExporter
         int prevSnesAddr = -1;
         int prevSize     = 0;
 
+        // Track every ROM offset the main loop visits so that labels landing
+        // inside skipped operand bytes can be caught and emitted as assignments.
+        var visitedOffsets = new HashSet<int>();
+
         while (i < romLen)
         {
             var ann = store.Bytes[i];
@@ -83,6 +87,8 @@ public static class SnesAsmExporter
                 i++;
                 continue;
             }
+
+            visitedOffsets.Add(i);
 
             // Emit org when not contiguous with the previous output block.
             bool needsOrg = prevSnesAddr < 0 || snesAddr != prevSnesAddr + prevSize;
@@ -130,7 +136,7 @@ public static class SnesAsmExporter
             i           += size;
         }
 
-        EmitLabelAssignments(sb, store, looseLabelsByOffset);
+        EmitLabelAssignments(sb, store, looseLabelsByOffset, synthLabelsByOffset, visitedOffsets, map);
 
         return sb.ToString();
     }
@@ -273,25 +279,48 @@ public static class SnesAsmExporter
     /// <list type="bullet">
     ///   <item>User labels whose SNES address does not map to any ROM offset
     ///         (hardware registers, WRAM variables, etc.).</item>
+    ///   <item>User labels whose ROM offset was never visited by the main emit
+    ///         loop (e.g. they land inside a multi-byte instruction's operand
+    ///         bytes and cannot be positional labels).</item>
     ///   <item>LOOSE_OP_ synthetic labels for branch targets that land inside
     ///         another instruction (Operand bytes). These cannot be positional
     ///         labels in the instruction stream.</item>
+    ///   <item>CODE_ synthetic labels whose offset was never visited (e.g. the
+    ///         branch target lands inside a multi-byte instruction when the
+    ///         store has no Operand byte type distinction).</item>
     /// </list>
     /// </summary>
     private static void EmitLabelAssignments(
         StringBuilder sb,
         RomAnnotationStore store,
-        Dictionary<int, string> looseLabelsByOffset)
+        Dictionary<int, string> looseLabelsByOffset,
+        Dictionary<int, string> synthLabelsByOffset,
+        HashSet<int> visitedOffsets,
+        RomMapMode map)
     {
         int romLen = store.Bytes.Length;
         var assignments = new List<(string name, int addr)>();
 
-        // Non-ROM user labels (hardware registers, WRAM, etc.)
+        // User labels: non-ROM addresses get assignments; ROM addresses at
+        // unvisited offsets (operand bytes of longer instructions) also get
+        // assignments since the main loop could never emit them positionally.
         foreach (var (snesAddr, name) in store.Labels)
         {
             if (name.Length == 0) continue;
-            if (!SnesAddressConverter.TryToRomOffset(snesAddr, store.MapMode, out _))
+            if (!SnesAddressConverter.TryToRomOffset(snesAddr, store.MapMode, out int romOffset))
+            {
                 assignments.Add((name, snesAddr));
+            }
+            else if (!visitedOffsets.Contains(romOffset))
+            {
+                // ROM label whose offset was skipped — emit as assignment using
+                // the canonical SNES address from the offset (not the stored key,
+                // which may be in upper-bank form).
+                if (SnesAddressConverter.TryToSnesAddress(romOffset, romLen, store.MapMode, out int canonical))
+                    assignments.Add((name, canonical));
+                else
+                    assignments.Add((name, snesAddr));
+            }
         }
 
         // LOOSE_OP_ labels for branch targets inside instructions
@@ -299,6 +328,19 @@ public static class SnesAsmExporter
         {
             if (SnesAddressConverter.TryToSnesAddress(offset, romLen, store.MapMode, out int snesAddr))
                 assignments.Add((name, snesAddr));
+        }
+
+        // CODE_ synthetic labels whose offset was skipped by the main loop.
+        // This happens when the store has no Operand byte distinction (e.g.
+        // BuildStoreFromMesen marks all code bytes as Opcode) and the branch
+        // target lands inside a multi-byte instruction's operand bytes.
+        foreach (var (offset, name) in synthLabelsByOffset)
+        {
+            if (!visitedOffsets.Contains(offset))
+            {
+                if (SnesAddressConverter.TryToSnesAddress(offset, romLen, store.MapMode, out int snesAddr))
+                    assignments.Add((name, AsmSnesAddr(snesAddr, map)));
+            }
         }
 
         if (assignments.Count == 0) return;

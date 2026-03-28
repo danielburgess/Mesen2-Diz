@@ -107,17 +107,17 @@
 									TextWrapping="Wrap" FontSize="12" />
 							</Border>
 
-							<!-- Assistant message: left-aligned, monospace -->
+							<!-- Assistant message: left-aligned bubble -->
 							<Border IsVisible="{Binding IsAssistant}"
-								Background="{StaticResource MesenGrayColor}"
+								Background="{StaticResource MesenGreenColor}"
 								CornerRadius="6" Padding="8,5"
 								HorizontalAlignment="Left" MaxWidth="560">
 								<StackPanel>
 									<SelectableTextBlock Text="{Binding Text}"
-										TextWrapping="Wrap"
-										FontFamily="Courier New,Monospace" FontSize="12" />
+										Foreground="White"
+										TextWrapping="Wrap" FontSize="12" />
 									<TextBlock IsVisible="{Binding IsStreaming}"
-										Text="▌" FontSize="12" Opacity="0.5" />
+										Text="▌" FontSize="12" Foreground="White" Opacity="0.5" />
 								</StackPanel>
 							</Border>
 
