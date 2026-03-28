@@ -1,0 +1,213 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
+
+jobs:
+  # ── Windows ──────────────────────────────────────────────────────────────
+  windows:
+    strategy:
+      matrix:
+        platform: [
+          {netversion: 8.x, targetframework: net8.0, aot: false, singleFile: true,  aotString: "",      assetName: "Mesen2-Diz-Windows-net8.zip"},
+          {netversion: 8.x, targetframework: net8.0, aot: true,  singleFile: false, aotString: " - AoT", assetName: "Mesen2-Diz-Windows-net8-AoT.zip"}
+        ]
+      fail-fast: false
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ matrix.platform.netversion }}
+
+      - uses: microsoft/setup-msbuild@v2
+        with:
+          msbuild-architecture: x64
+
+      - name: Restore packages
+        run: dotnet restore -p:TargetFramework="${{ matrix.platform.targetframework }}" -r win-x64 -p:PublishAot="${{ matrix.platform.aot }}" -p:BuildWithNetFrameworkHostedCompiler=true
+
+      - uses: ./.github/actions/build-sha1-action
+
+      - name: Build
+        run: msbuild -nologo -v:m -clp:ForceConsoleColor -m -p:Configuration=Release -p:Platform=x64 -t:Clean,UI -p:TargetFramework="${{ matrix.platform.targetframework }}"
+
+      - name: Publish
+        run: dotnet publish --no-restore -c Release -p:PublishAot="${{ matrix.platform.aot }}" -p:SelfContained="${{ matrix.platform.aot }}" -p:PublishSingleFile="${{ matrix.platform.singleFile }}" -p:OptimizeUi="true" -p:Platform="Any CPU" -p:TargetFramework="${{ matrix.platform.targetframework }}" -r win-x64 Mesen.sln /p:PublishProfile=UI\Properties\PublishProfiles\Release.pubxml
+
+      - name: Zip
+        run: Compress-Archive -Path build/TmpReleaseBuild/Mesen.exe -DestinationPath ${{ matrix.platform.assetName }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.platform.targetframework }}${{ matrix.platform.aotString }}
+          path: ${{ matrix.platform.assetName }}
+
+  # ── Linux ─────────────────────────────────────────────────────────────────
+  linux:
+    strategy:
+      matrix:
+        platform: [
+          {os: ubuntu-22.04, arch: x64,   assetName: "Mesen2-Diz-Linux-x64.zip"}
+        ]
+      fail-fast: false
+    runs-on: ${{ matrix.platform.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.x
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qy
+          sudo apt-get install -qy libsdl2-dev ccache
+
+      - uses: ./.github/actions/setup-ccache-action
+
+      - uses: ./.github/actions/build-sha1-action
+
+      - name: Build
+        run: make -j$(nproc) -O LTO=true STATICLINK=true SYSTEM_LIBEVDEV=false
+
+      - name: Zip
+        run: |
+          zip -j ${{ matrix.platform.assetName }} \
+            bin/linux-${{ matrix.platform.arch }}/Release/linux-${{ matrix.platform.arch }}/publish/Mesen
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.platform.arch }}
+          path: ${{ matrix.platform.assetName }}
+
+  # ── Linux AppImage ────────────────────────────────────────────────────────
+  appimage:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.x
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qy
+          sudo apt-get install -qy libsdl2-dev libfuse2 ccache
+
+      - uses: ./.github/actions/setup-ccache-action
+
+      - uses: ./.github/actions/build-sha1-action
+
+      - name: Build AppImage
+        run: Linux/appimage/appimage.sh
+
+      - name: Rename AppImage
+        run: mv Mesen.AppImage Mesen2-Diz-Linux-x64.AppImage
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: Mesen2-Diz-Linux-x64.AppImage
+
+  # ── macOS ─────────────────────────────────────────────────────────────────
+  macos:
+    strategy:
+      matrix:
+        platform: [
+          {os: macos-13, arch: x64,   assetName: "Mesen2-Diz-macOS-Intel.zip"},
+          {os: macos-14, arch: arm64, assetName: "Mesen2-Diz-macOS-AppleSilicon.zip"}
+        ]
+      fail-fast: false
+    runs-on: ${{ matrix.platform.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.x
+
+      - name: Install dependencies
+        run: brew install sdl2 ccache
+
+      - name: Get brew prefix
+        run: echo "brewPrefix=$(brew --prefix)" >> "$GITHUB_ENV"
+
+      - uses: ./.github/actions/setup-ccache-action
+        with:
+          ccache-path: '${{ env.brewPrefix }}/opt/ccache/libexec'
+
+      - uses: ./.github/actions/build-sha1-action
+
+      - name: Build
+        run: make -j$(sysctl -n hw.logicalcpu)
+
+      - name: Zip
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            bin/osx-${{ matrix.platform.arch }}/Release/osx-${{ matrix.platform.arch }}/publish/Mesen.app \
+            ${{ matrix.platform.assetName }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.platform.arch }}
+          path: ${{ matrix.platform.assetName }}
+
+  # ── Create GitHub Release ─────────────────────────────────────────────────
+  release:
+    needs: [windows, linux, appimage, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          gh release create "$TAG" \
+            --title "Mesen2-Diz $TAG" \
+            --notes "## Mesen2-Diz $TAG
+
+          See [README](https://github.com/${{ github.repository }}/blob/master/README.md) for feature documentation.
+
+          ### Downloads
+          | File | Platform |
+          |------|----------|
+          | \`Mesen2-Diz-Windows-net8-AoT.zip\` | Windows (recommended — no .NET required) |
+          | \`Mesen2-Diz-Windows-net8.zip\` | Windows (.NET 8 required) |
+          | \`Mesen2-Diz-Linux-x64.AppImage\` | Linux x64 AppImage (recommended) |
+          | \`Mesen2-Diz-Linux-x64.zip\` | Linux x64 binary |
+          | \`Mesen2-Diz-macOS-Intel.zip\` | macOS Intel (Mesen.app) |
+          | \`Mesen2-Diz-macOS-AppleSilicon.zip\` | macOS Apple Silicon (Mesen.app) |
+          " \
+            artifacts/*
