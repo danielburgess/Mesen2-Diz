@@ -79,7 +79,12 @@ namespace Mesen.Debugger.AI
 					["content"] = assistantContent
 				});
 
-				if(stopReason != "tool_use" || toolUses.Count == 0)
+				// Drive the loop off toolUses, not stopReason. If the SSE stream closes before
+				// the message_delta event arrives (network drop, server timeout, etc.), stopReason
+				// stays "end_turn" even though tool_use blocks were already accumulated. Checking
+				// stopReason would then break here and leave an assistant message with unmatched
+				// tool_use blocks in history — the orphan that causes the 400 on the next turn.
+				if(toolUses.Count == 0)
 					break;
 
 				// Execute tools and collect results
@@ -287,29 +292,55 @@ namespace Mesen.Debugger.AI
 		/// </summary>
 		private static void StripOrphanedToolUse(List<JsonObject> messages)
 		{
-			if(messages.Count == 0) return;
+			// Scan forward. For each assistant message that contains tool_use blocks, verify
+			// that the immediately following message is a user message with matching tool_result
+			// entries. If not, remove just that assistant message in place (leave anything after
+			// it — in particular the most-recently added real user message — untouched).
+			for(int i = 0; i < messages.Count; i++) {
+				var msg = messages[i];
+				if(msg["role"]?.GetValue<string>() != "assistant") continue;
 
-			int last = messages.Count - 1;
-			var msg = messages[last];
-			if(msg["role"]?.GetValue<string>() != "assistant") return;
+				var content = msg["content"] as JsonArray;
+				if(content == null) continue;
 
-			var content = msg["content"] as JsonArray;
-			if(content == null) return;
+				var toolUseIds = new HashSet<string>();
+				foreach(var block in content) {
+					if(block is JsonObject b &&
+					   b["type"]?.GetValue<string>() == "tool_use" &&
+					   b["id"]?.GetValue<string>() is string id)
+						toolUseIds.Add(id);
+				}
 
-			// Collect all tool_use ids in this assistant message
-			var toolUseIds = new HashSet<string>();
-			foreach(var block in content) {
-				if(block is JsonObject b &&
-				   b["type"]?.GetValue<string>() == "tool_use" &&
-				   b["id"]?.GetValue<string>() is string id)
-					toolUseIds.Add(id);
+				if(toolUseIds.Count == 0) continue; // no tool_use — move on
+
+				// Check whether the next message holds all the matching tool_results
+				bool matched = false;
+				if(i + 1 < messages.Count) {
+					var next = messages[i + 1];
+					if(next["role"]?.GetValue<string>() == "user" &&
+					   next["content"] is JsonArray nextContent) {
+						matched = true;
+						foreach(string tuId in toolUseIds) {
+							bool found = false;
+							foreach(var block in nextContent) {
+								if(block is JsonObject b &&
+								   b["type"]?.GetValue<string>() == "tool_result" &&
+								   b["tool_use_id"]?.GetValue<string>() == tuId) {
+									found = true;
+									break;
+								}
+							}
+							if(!found) { matched = false; break; }
+						}
+					}
+				}
+
+				if(matched) continue;
+
+				// Orphaned: remove only this assistant message; messages after it stay.
+				messages.RemoveAt(i);
+				i--; // recheck this index after the shift
 			}
-
-			if(toolUseIds.Count == 0) return; // no tool_use — history is valid
-
-			// The last message is an assistant with tool_use but has no following tool_result —
-			// it is orphaned. Remove it so the next API call starts from a valid state.
-			messages.RemoveAt(last);
 		}
 
 				/// <summary>
