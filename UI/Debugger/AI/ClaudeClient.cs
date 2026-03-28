@@ -287,47 +287,29 @@ namespace Mesen.Debugger.AI
 		/// </summary>
 		private static void StripOrphanedToolUse(List<JsonObject> messages)
 		{
-			for(int i = messages.Count - 1; i >= 0; i--) {
-				var msg = messages[i];
-				if(msg["role"]?.GetValue<string>() != "assistant") break;
+			if(messages.Count == 0) return;
 
-				var content = msg["content"] as JsonArray;
-				if(content == null) break;
+			int last = messages.Count - 1;
+			var msg = messages[last];
+			if(msg["role"]?.GetValue<string>() != "assistant") return;
 
-				// Collect all tool_use ids in this assistant message
-				var toolUseIds = new HashSet<string>();
-				foreach(var block in content) {
-					if(block is JsonObject b &&
-					   b["type"]?.GetValue<string>() == "tool_use" &&
-					   b["id"]?.GetValue<string>() is string id)
-						toolUseIds.Add(id);
-				}
+			var content = msg["content"] as JsonArray;
+			if(content == null) return;
 
-				if(toolUseIds.Count == 0) break; // no tool_use — history is valid up to here
-
-				// Check the immediately following message for matching tool_results
-				bool isMatched = false;
-				if(i + 1 < messages.Count) {
-					var next = messages[i + 1];
-					if(next["role"]?.GetValue<string>() == "user" &&
-					   next["content"] is JsonArray nextContent) {
-						var resultIds = new HashSet<string>();
-						foreach(var block in nextContent) {
-							if(block is JsonObject b &&
-							   b["type"]?.GetValue<string>() == "tool_result" &&
-							   b["tool_use_id"]?.GetValue<string>() is string rid)
-								resultIds.Add(rid);
-						}
-						isMatched = toolUseIds.IsSubsetOf(resultIds);
-					}
-				}
-
-				if(isMatched) break; // properly paired — history is valid
-
-				// Orphaned tool_use: remove this assistant message and everything after it
-				messages.RemoveRange(i, messages.Count - i);
-				break;
+			// Collect all tool_use ids in this assistant message
+			var toolUseIds = new HashSet<string>();
+			foreach(var block in content) {
+				if(block is JsonObject b &&
+				   b["type"]?.GetValue<string>() == "tool_use" &&
+				   b["id"]?.GetValue<string>() is string id)
+					toolUseIds.Add(id);
 			}
+
+			if(toolUseIds.Count == 0) return; // no tool_use — history is valid
+
+			// The last message is an assistant with tool_use but has no following tool_result —
+			// it is orphaned. Remove it so the next API call starts from a valid state.
+			messages.RemoveAt(last);
 		}
 
 				/// <summary>
