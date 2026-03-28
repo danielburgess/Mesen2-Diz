@@ -107,6 +107,29 @@ namespace Mesen.Debugger.AI
 					["comment"] = Prop("string", "Comment text. Empty string to clear comment.")
 				}, new[] { "address", "name" })),
 
+			Tool("set_labels",
+				"Set multiple label names and/or comments in one call. Each entry is an object with \"address\", \"name\", and \"comment\" fields (same rules as set_label). " +
+				"Prefer this over repeated set_label calls when annotating many addresses at once.",
+				new JsonObject {
+					["type"] = "object",
+					["properties"] = new JsonObject {
+						["labels"] = new JsonObject {
+							["type"] = "array",
+							["description"] = "Array of label entries to set.",
+							["items"] = new JsonObject {
+								["type"] = "object",
+								["properties"] = new JsonObject {
+									["address"] = Prop("string", "SNES CPU address as hex string"),
+									["name"]    = Prop("string", "Label name. Empty string to keep existing name."),
+									["comment"] = Prop("string", "Comment text. Empty string to clear comment.")
+								},
+								["required"] = new JsonArray("address", "name")
+							}
+						}
+					},
+					["required"] = new JsonArray("labels")
+				}),
+
 			Tool("delete_label",
 				"Delete the label at a SNES CPU address.",
 				Schema("", new() {
@@ -127,6 +150,16 @@ namespace Mesen.Debugger.AI
 					["address"] = Prop("string", "SNES CPU address as hex string"),
 					["reason"] = Prop("string", "Why this address needs review")
 				}, new[] { "address", "reason" })),
+
+		Tool("get_rom_map",
+			"Get a full ROM overview in one call: all labels (with approximate sizes and comments), CDL coverage stats, and contiguous unreached (CDL=0) address ranges. " +
+			"Use this instead of calling get_labels + get_annotation_summary + get_cdl_data separately when you want a broad picture of what is annotated and what still needs work. " +
+			"Optionally restrict output to a single SNES bank.",
+			Schema("", new() {
+				["bank"]              = Prop("string",  "Optional: restrict output to one SNES bank, e.g. \"80\" or \"$80\". Omit for the whole ROM."),
+				["include_unreached"] = Prop("boolean", "Include contiguous unreached (CDL=0) address ranges (default true)."),
+				["max_ranges"]        = Prop("integer", "Maximum unreached ranges to list (1\u2013500, default 100).")
+			}, Array.Empty<string>())),
 
 		// ── Emulation control ──────────────────────────────────────────────
 
@@ -215,10 +248,12 @@ namespace Mesen.Debugger.AI
 					"get_labels" => DoGetLabels(),
 					"get_label_at" => DoGetLabelAt(input),
 					"set_label" => DoSetLabel(input),
+					"set_labels" => DoSetLabels(input),
 					"delete_label" => DoDeleteLabel(input),
 					"get_call_stack" => DoGetCallStack(),
 					"get_annotation_summary" => DoGetAnnotationSummary(),
 					"add_to_review_queue"  => DoAddToReviewQueue(input),
+					"get_rom_map"          => DoGetRomMap(input),
 					"pause_emulation"      => DoPauseEmulation(),
 					"resume_emulation"     => DoResumeEmulation(),
 					"reset_game"           => DoResetGame(input),
@@ -389,7 +424,57 @@ namespace Mesen.Debugger.AI
 			return $"Label set: ${addr:X6} → name='{name}' comment='{comment}'";
 		}
 
-		private string DoDeleteLabel(JsonObject input)
+		private string DoSetLabels(JsonObject input)
+		{
+			var arr = input["labels"]?.AsArray();
+			if(arr == null || arr.Count == 0) return "No labels provided.";
+
+			int set = 0, skipped = 0;
+			var errors = new List<string>();
+
+			foreach(var node in arr) {
+				if(node is not JsonObject entry) continue;
+				string addrStr  = entry["address"]?.GetValue<string>() ?? "";
+				string name     = entry["name"]?.GetValue<string>() ?? "";
+				string comment  = entry["comment"]?.GetValue<string>() ?? "";
+
+				if(addrStr.Length == 0) { errors.Add("entry missing address"); continue; }
+
+				if(!string.IsNullOrEmpty(name) && !LabelManager.LabelRegex.IsMatch(name)) {
+					errors.Add($"Invalid label name '{name}' for ${addrStr}");
+					skipped++;
+					continue;
+				}
+
+				uint addr = ParseAddress(addrStr);
+				var absAddr = DebugApi.GetAbsoluteAddress(new AddressInfo { Address = (int)addr, Type = _cpuMemType });
+				if(absAddr.Type == MemoryType.None || absAddr.Address < 0) {
+					errors.Add($"${addr:X6} does not map to ROM");
+					skipped++;
+					continue;
+				}
+
+				if(string.IsNullOrEmpty(name)) {
+					name = LabelManager.GetLabel(absAddr)?.Label ?? "";
+				}
+
+				LabelManager.SetLabel(new CodeLabel {
+					Address    = (uint)absAddr.Address,
+					MemoryType = absAddr.Type,
+					Label      = name,
+					Comment    = comment,
+					Length     = 1
+				}, raiseEvent: true);
+				set++;
+			}
+
+			DebugWorkspaceManager.AutoSave();
+			string result = $"Set {set} label(s), skipped {skipped}.";
+			if(errors.Count > 0) result += " Errors: " + string.Join("; ", errors);
+			return result;
+		}
+
+				private string DoDeleteLabel(JsonObject input)
 		{
 			uint addr = ParseAddress(input["address"]?.GetValue<string>() ?? "0");
 			var absAddr = DebugApi.GetAbsoluteAddress(new AddressInfo { Address = (int)addr, Type = _cpuMemType });
@@ -459,6 +544,99 @@ namespace Mesen.Debugger.AI
 				Source = ReviewQueueItemSource.AiRequested
 			});
 			return $"Added ${addr:X6} to review queue: {reason}";
+		}
+
+
+		private string DoGetRomMap(JsonObject input)
+		{
+			int romSize = DebugApi.GetMemorySize(_romMemType);
+			if(romSize <= 0) return "No ROM loaded.";
+
+			bool includeUnreached = input["include_unreached"]?.GetValue<bool>() ?? true;
+			int maxRanges = Math.Clamp(input["max_ranges"]?.GetValue<int>() ?? 100, 1, 500);
+			string? bankStr = input["bank"]?.GetValue<string>()?.TrimStart('$');
+			int? filterBank = bankStr != null ? Convert.ToInt32(bankStr, 16) : (int?)null;
+
+			var sb = new StringBuilder();
+
+			// CDL stats
+			var stats = DebugApi.GetCdlStatistics(_romMemType);
+			double codePct = romSize > 0 ? 100.0 * stats.CodeBytes / romSize : 0;
+			double dataPct = romSize > 0 ? 100.0 * stats.DataBytes / romSize : 0;
+			sb.AppendLine($"ROM size: {romSize:N0} bytes");
+			sb.AppendLine($"CDL coverage: {stats.CodeBytes:N0} code ({codePct:F1}%), {stats.DataBytes:N0} data ({dataPct:F1}%), {romSize - stats.CodeBytes - stats.DataBytes:N0} unreached ({100 - codePct - dataPct:F1}%)");
+			sb.AppendLine($"CDL functions: {stats.FunctionCount:N0}  jump targets: {stats.JumpTargetCount:N0}");
+
+			// Labels
+			var allLabels = LabelManager.GetAllLabels()
+				.Where(l => l.MemoryType == _romMemType)
+				.OrderBy(l => l.Address)
+				.ToList();
+
+			var entries = new List<(uint romOffset, uint snesAddr, string name, string comment)>();
+			foreach(var lbl in allLabels) {
+				var rel = DebugApi.GetRelativeAddress(new AddressInfo { Address = (int)lbl.Address, Type = _romMemType }, _cpu);
+				if(rel.Address < 0) continue;
+				uint snesAddr = (uint)rel.Address;
+				if(filterBank.HasValue && (snesAddr >> 16) != (uint)filterBank.Value) continue;
+				entries.Add((lbl.Address, snesAddr, lbl.Label, lbl.Comment));
+			}
+
+			sb.AppendLine();
+			sb.AppendLine($"=== Labels ({entries.Count}{(filterBank.HasValue ? $" in bank ${filterBank:X2}" : "")}) ===");
+			if(entries.Count == 0) {
+				sb.AppendLine("  (none)");
+			} else {
+				for(int i = 0; i < entries.Count; i++) {
+					var (romOff, snesAddr, name, comment) = entries[i];
+					string sizeStr = "";
+					if(i + 1 < entries.Count) {
+						int gap = (int)(entries[i + 1].romOffset - romOff);
+						if(gap > 0 && gap < 0x10000) sizeStr = $" (~{gap}b)";
+					}
+					string commentStr = comment.Length > 0 ? $"  ; {comment}" : "";
+					sb.AppendLine($"  ${snesAddr:X6}  {name}{sizeStr}{commentStr}");
+				}
+			}
+
+			if(!includeUnreached) return sb.ToString();
+
+			// Unreached ranges: CDL == 0
+			var cdl = DebugApi.GetCdlData(0, (uint)romSize, _romMemType);
+			var ranges = new List<(int start, int end)>();
+			int? rangeStart = null;
+			for(int i = 0; i <= cdl.Length; i++) {
+				bool unreached = i < cdl.Length && cdl[i] == 0;
+				if(unreached && rangeStart == null) rangeStart = i;
+				else if(!unreached && rangeStart.HasValue) {
+					ranges.Add((rangeStart.Value, i - 1));
+					rangeStart = null;
+				}
+			}
+
+			// Filter to bank if requested
+			var filteredRanges = new List<(int start, int end)>();
+			foreach(var (start, end) in ranges) {
+				var rel = DebugApi.GetRelativeAddress(new AddressInfo { Address = start, Type = _romMemType }, _cpu);
+				if(rel.Address < 0) continue;
+				if(filterBank.HasValue && ((uint)rel.Address >> 16) != (uint)filterBank.Value) continue;
+				filteredRanges.Add((start, end));
+			}
+
+			int total = filteredRanges.Count;
+			sb.AppendLine();
+			sb.AppendLine($"=== Unreached Ranges (showing {Math.Min(total, maxRanges)} of {total}) ===");
+			int shown = 0;
+			foreach(var (start, end) in filteredRanges) {
+				if(shown >= maxRanges) break;
+				var startRel = DebugApi.GetRelativeAddress(new AddressInfo { Address = start, Type = _romMemType }, _cpu);
+				var endRel   = DebugApi.GetRelativeAddress(new AddressInfo { Address = end,   Type = _romMemType }, _cpu);
+				string startStr = startRel.Address >= 0 ? $"${startRel.Address:X6}" : $"ROM+{start:X6}";
+				string endStr   = endRel.Address   >= 0 ? $"${endRel.Address:X6}"   : $"ROM+{end:X6}";
+				sb.AppendLine($"  {startStr}\u2013{endStr}  ({end - start + 1} bytes)");
+				shown++;
+			}
+			return sb.ToString();
 		}
 
 		// ── Emulation control implementations ────────────────────────────────
