@@ -1,0 +1,134 @@
+<UserControl
+	xmlns="https://github.com/avaloniaui"
+	xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+	xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+	xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+	xmlns:vm="using:Mesen.Debugger.ViewModels"
+	xmlns:c="using:Mesen.Controls"
+	xmlns:cfg="using:Mesen.Config"
+	mc:Ignorable="d" d:DesignWidth="300" d:DesignHeight="400"
+	x:DataType="vm:AiCompanionViewModel"
+	x:Class="Mesen.Debugger.Views.AiChatView"
+>
+	<DockPanel>
+
+		<!-- Header bar: model + monitoring + clear -->
+		<Border DockPanel.Dock="Top"
+			BorderThickness="0,0,0,1"
+			BorderBrush="{StaticResource MesenBorderColor}"
+			Padding="4,3">
+			<Grid ColumnDefinitions="Auto,*,Auto,Auto">
+				<TextBlock Grid.Column="0" Text="Monitor:" FontSize="11"
+					VerticalAlignment="Center" Margin="0,0,4,0" />
+				<c:EnumComboBox Grid.Column="1"
+					SelectedItem="{Binding Config.MonitoringMode}"
+					FontSize="11" />
+				<Button Grid.Column="2" Margin="4,0,0,0" Padding="6,2"
+					Command="{Binding ClearCommand}"
+					ToolTip.Tip="Clear chat history">
+					<TextBlock Text="Clear" FontSize="11" />
+				</Button>
+			</Grid>
+		</Border>
+
+		<!-- Status bar -->
+		<Border DockPanel.Dock="Bottom"
+			BorderThickness="0,1,0,0"
+			BorderBrush="{StaticResource MesenBorderColor}"
+			Padding="4,2">
+			<TextBlock Text="{Binding StatusText}" FontSize="11"
+				Foreground="{StaticResource MesenTextMutedColor}" />
+		</Border>
+
+		<!-- Input row -->
+		<Border DockPanel.Dock="Bottom"
+			BorderThickness="0,1,0,0"
+			BorderBrush="{StaticResource MesenBorderColor}"
+			Padding="4">
+			<Grid ColumnDefinitions="*,Auto">
+				<TextBox Grid.Column="0"
+					x:Name="txtInput"
+					Text="{Binding InputText}"
+					Watermark="Ask Claude about the code..."
+					AcceptsReturn="False"
+					FontSize="12"
+					KeyDown="OnInputKeyDown" />
+				<Button Grid.Column="1" Margin="4,0,0,0" Padding="10,4"
+					Click="OnSendCancelClick">
+					<Panel>
+						<TextBlock Text="Send"
+							IsVisible="{Binding IsBusy, Converter={x:Static BoolConverters.Not}}" />
+						<TextBlock Text="Cancel"
+							IsVisible="{Binding IsBusy}" />
+					</Panel>
+				</Button>
+			</Grid>
+		</Border>
+
+		<!-- Message list -->
+		<ScrollViewer x:Name="chatScroll" HorizontalScrollBarVisibility="Disabled">
+			<ItemsControl ItemsSource="{Binding Messages}" Margin="4">
+				<ItemsControl.ItemTemplate>
+					<DataTemplate x:DataType="vm:ChatEntry">
+						<Panel Margin="2,3">
+
+							<!-- User message: right-aligned bubble -->
+							<Border IsVisible="{Binding IsUser}"
+								Background="{StaticResource MesenBlueColor}"
+								CornerRadius="6" Padding="8,5"
+								HorizontalAlignment="Right" MaxWidth="480">
+								<TextBlock Text="{Binding Text}"
+									Foreground="White"
+									TextWrapping="Wrap" FontSize="12" />
+							</Border>
+
+							<!-- Assistant message: left-aligned, monospace -->
+							<Border IsVisible="{Binding IsAssistant}"
+								Background="{StaticResource MesenGrayColor}"
+								CornerRadius="6" Padding="8,5"
+								HorizontalAlignment="Left" MaxWidth="560">
+								<StackPanel>
+									<TextBlock Text="{Binding Text}"
+										TextWrapping="Wrap"
+										FontFamily="Courier New,Monospace" FontSize="12" />
+									<TextBlock IsVisible="{Binding IsStreaming}"
+										Text="▌" FontSize="12" Opacity="0.5" />
+								</StackPanel>
+							</Border>
+
+							<!-- Tool status: centered, muted italic -->
+							<Border IsVisible="{Binding IsToolStatus}"
+								Padding="4,1" HorizontalAlignment="Center">
+								<TextBlock Text="{Binding Text}"
+									FontSize="11"
+									Foreground="{StaticResource MesenTextMutedColor}"
+									FontStyle="Italic" />
+							</Border>
+
+							<!-- System message: centered, muted -->
+							<Border IsVisible="{Binding IsSystem}"
+								Padding="4,1" HorizontalAlignment="Center">
+								<TextBlock Text="{Binding Text}"
+									FontSize="11"
+									Foreground="{StaticResource MesenTextMutedColor}"
+									TextWrapping="Wrap" />
+							</Border>
+
+							<!-- Error: red banner -->
+							<Border IsVisible="{Binding IsError}"
+								Background="{StaticResource MesenErrorColor}"
+								CornerRadius="4" Padding="8,5"
+								HorizontalAlignment="Stretch">
+								<TextBlock Text="{Binding Text}"
+									Foreground="White"
+									TextWrapping="Wrap" FontSize="12" />
+							</Border>
+
+						</Panel>
+					</DataTemplate>
+				</ItemsControl.ItemTemplate>
+			</ItemsControl>
+		</ScrollViewer>
+
+	</DockPanel>
+</UserControl>

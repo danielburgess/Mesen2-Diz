@@ -50,6 +50,7 @@ namespace Mesen.Debugger.ViewModels
 		[Reactive] public MemoryMappingViewModel? MemoryMappings { get; private set; }
 		[Reactive] public FindResultListViewModel FindResultList { get; private set; }
 		[Reactive] public ControllerListViewModel ControllerList { get; private set; }
+		[Reactive] public AiCompanionViewModel AiCompanion { get; private set; }
 
 		[Reactive] public DebuggerDockFactory DockFactory { get; private set; }
 		[Reactive] public IRootDock DockLayout { get; private set; }
@@ -112,6 +113,7 @@ namespace Mesen.Debugger.ViewModels
 			LabelList = AddDisposable(new LabelListViewModel(CpuType, this));
 			FindResultList = AddDisposable(new FindResultListViewModel(this));
 			ControllerList = new ControllerListViewModel(consoleType);
+			AiCompanion = AddDisposable(new AiCompanionViewModel());
 			if(CpuType.SupportsFunctionList()) {
 				FunctionList = AddDisposable(new FunctionListViewModel(CpuType, this));
 			}
@@ -143,6 +145,8 @@ namespace Mesen.Debugger.ViewModels
 			DockFactory.WatchListTool.Model = WatchList;
 			DockFactory.FindResultListTool.Model = FindResultList;
 			DockFactory.ControllerListTool.Model = ControllerList;
+			DockFactory.AiChatTool.Model = AiCompanion;
+			DockFactory.AiQueueTool.Model = new AiCompanionQueueViewModel(AiCompanion);
 			DockFactory.DisassemblyTool.Model = Disassembly;
 			DockFactory.SourceViewTool.Model = null;
 			DockFactory.StatusTool.Model = ConsoleStatus;
@@ -610,6 +614,16 @@ namespace Mesen.Debugger.ViewModels
 					ActionType = ActionType.ShowWatchList,
 					IsSelected = () => IsToolVisible(DockFactory.WatchListTool),
 					OnClick = () => ToggleTool(DockFactory.WatchListTool)
+				},
+				new ContextMenuAction() {
+					ActionType = ActionType.ShowAiChat,
+					IsSelected = () => IsToolVisible(DockFactory.AiChatTool),
+					OnClick = () => ToggleTool(DockFactory.AiChatTool)
+				},
+				new ContextMenuAction() {
+					ActionType = ActionType.ShowAiQueue,
+					IsSelected = () => IsToolVisible(DockFactory.AiQueueTool),
+					OnClick = () => ToggleTool(DockFactory.AiQueueTool)
 				},
 				new ContextMenuSeparator(),
 				new ContextMenuAction() {

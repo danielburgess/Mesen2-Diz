@@ -327,5 +327,46 @@
 				Content="{l:Translate chkSingleBreakpointPerInstruction}"
 			/>
 		</c:OptionSection>
+	<c:OptionSection Header="AI Companion">
+		<Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" HorizontalAlignment="Stretch">
+			<TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" Text="API Key:" Margin="0,0,6,2" />
+			<TextBox Grid.Row="0" Grid.Column="1"
+				Text="{Binding AiConfig.ApiKey}"
+				PasswordChar="•"
+				FontSize="11" Padding="3,2"
+				ToolTip.Tip="Anthropic API key (stored in debugger config)" />
+
+			<TextBlock Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Text="Model:" Margin="0,2,6,2" />
+			<ComboBox Grid.Row="1" Grid.Column="1"
+				ItemsSource="{Binding AiConfig.Models}"
+				SelectedItem="{Binding AiConfig.Model}"
+				FontSize="11" Margin="0,2,0,0" HorizontalAlignment="Stretch"
+				ToolTip.Tip="Model list is editable in settings.json" />
+
+			<TextBlock Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Text="Max Tokens:" Margin="0,2,6,2" />
+			<NumericUpDown Grid.Row="2" Grid.Column="1"
+				Value="{Binding AiConfig.MaxTokens}"
+				Minimum="256" Maximum="32000" Increment="512"
+				FormatString="0"
+				FontSize="11" Padding="3,2" Margin="0,2,0,0" />
+
+			<TextBlock Grid.Row="3" Grid.Column="0" VerticalAlignment="Center" Text="History Turns:" Margin="0,2,6,2" />
+			<NumericUpDown Grid.Row="3" Grid.Column="1"
+				Value="{Binding AiConfig.MaxHistoryTurns}"
+				Minimum="1" Maximum="100" Increment="1"
+				FormatString="0"
+				FontSize="11" Padding="3,2" Margin="0,2,0,0" />
+
+			<TextBlock Grid.Row="4" Grid.Column="0" VerticalAlignment="Center" Text="Monitoring:" Margin="0,2,6,2" />
+			<c:EnumComboBox Grid.Row="4" Grid.Column="1"
+				SelectedItem="{Binding AiConfig.MonitoringMode}"
+				Margin="0,2,0,0" />
+
+			<CheckBox Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2"
+				IsChecked="{Binding AiConfig.ShowToolCalls}"
+				Content="Show tool calls in chat"
+				Margin="0,4,0,0" />
+		</Grid>
+	</c:OptionSection>
 	</StackPanel>
 </UserControl>

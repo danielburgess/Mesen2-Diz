@@ -167,6 +167,7 @@ namespace Mesen.Debugger.Windows
 					break;
 
 				case ConsoleNotificationType.GameLoaded:
+					Dispatcher.UIThread.Post(() => _model.AiCompanion.OnGameLoaded());
 					RomInfo romInfo = EmuApi.GetRomInfo();
 					HashSet<CpuType> cpuTypes = romInfo.CpuTypes;
 					if(!cpuTypes.Contains(_model.CpuType)) {

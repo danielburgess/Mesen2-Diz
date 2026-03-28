@@ -393,6 +393,8 @@ namespace Mesen.Debugger.Utilities
 		ShowLabelList,
 		ShowCallStack,
 		ShowControllers,
+		ShowAiChat,
+		ShowAiQueue,
 
 		ShowSettingsPanel,
 		ShowMemoryMappings,

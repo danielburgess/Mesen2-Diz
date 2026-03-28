@@ -3066,6 +3066,11 @@ E
 			<Value ID="Show">Show</Value>
 			<Value ID="Disassemble">Disassemble</Value>
 		</Enum>
+		<Enum ID="AiMonitoringMode">
+			<Value ID="Disabled">Disabled</Value>
+			<Value ID="Queue">Queue (collect for review)</Value>
+			<Value ID="AutoPause">Auto-pause and analyze</Value>
+		</Enum>
 		<Enum ID="AddressDisplayType">
 			<Value ID="CpuAddress">CPU address</Value>
 			<Value ID="AbsAddress">ROM address</Value>
@@ -3462,6 +3467,8 @@ E
 			<Value ID="ShowCallStack">Show call stack</Value>
 			<Value ID="ShowConsoleStatus">Show console status</Value>
 			<Value ID="ShowControllers">Show controllers</Value>
+			<Value ID="ShowAiChat">Show AI chat</Value>
+			<Value ID="ShowAiQueue">Show AI queue/tool log</Value>
 			
 			<Value ID="ShowSettingsPanel">Show settings panel</Value>
 			<Value ID="ShowMemoryMappings">Show memory mappings</Value>

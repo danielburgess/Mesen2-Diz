@@ -7,6 +7,7 @@ namespace Mesen.Debugger.ViewModels
 	public class DebuggerOptionsViewModel : ViewModelBase
 	{
 		public DebuggerConfig Config { get; }
+		public AiCompanionConfig AiConfig => ConfigManager.Config.Debug.AiCompanion;
 
 		public bool IsSnes { get; }
 		public bool IsSpc { get; }
