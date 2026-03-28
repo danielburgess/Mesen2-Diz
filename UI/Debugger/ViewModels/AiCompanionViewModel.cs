@@ -54,6 +54,7 @@ namespace Mesen.Debugger.ViewModels
 		public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> SendCommand { get; }
 		public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> CancelCommand { get; }
 		public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> ClearCommand { get; }
+		public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> ClearContextCommand { get; }
 		public ReactiveCommand<ReviewQueueItem, System.Reactive.Unit> AnalyzeQueueItemCommand { get; }
 
 		// ── Infrastructure ────────────────────────────────────────────────────
@@ -63,6 +64,8 @@ namespace Mesen.Debugger.ViewModels
 		private readonly ExecutionMonitor _monitor;
 		private readonly List<JsonObject> _history = new();
 		private CancellationTokenSource? _cts;
+		private string _historyPath = "";
+		private string _contextText = "";  // loaded from context file
 
 		public AiCompanionConfig Config => ConfigManager.Config.Debug.AiCompanion;
 
@@ -84,6 +87,7 @@ namespace Mesen.Debugger.ViewModels
 			SendCommand = ReactiveCommand.CreateFromTask(SendMessageAsync, canSend);
 			CancelCommand = ReactiveCommand.Create(() => _cts?.Cancel());
 			ClearCommand = ReactiveCommand.Create(ClearChat);
+			ClearContextCommand = ReactiveCommand.Create(ClearContextFile);
 			AnalyzeQueueItemCommand = ReactiveCommand.CreateFromTask<ReviewQueueItem>(AnalyzeQueueItemAsync, canSend);
 
 			// Mirror MonitoringMode config to the ExecutionMonitor
@@ -92,7 +96,7 @@ namespace Mesen.Debugger.ViewModels
 				else _monitor.Stop();
 			}));
 
-			AddSystemMessage("AI Companion ready. Type a message or use the Review Queue to analyze unannotated code.");
+			LoadHistory();
 		}
 
 		// ── Public API ────────────────────────────────────────────────────────
@@ -103,8 +107,8 @@ namespace Mesen.Debugger.ViewModels
 			_tools.Reset();
 			_cts?.Cancel();
 
-			// Save previous session before clearing
-			SaveCurrentHistory();
+			// Save previous ROM's session using its cached path (GetHistoryPath() now returns the new ROM's path)
+			SaveHistoryToPath(_historyPath);
 
 			_history.Clear();
 			Messages.Clear();
@@ -112,6 +116,63 @@ namespace Mesen.Debugger.ViewModels
 
 			// Load history for newly loaded ROM
 			LoadHistory();
+		}
+
+		// ── Context File ──────────────────────────────────────────────────────
+
+		/// <summary>
+		/// Resolves the auto-discovery path: {romDir}/{romName}.context.txt
+		/// Returns "" if no ROM is loaded.
+		/// </summary>
+		private static string GetAutoContextPath()
+		{
+			RomInfo info = EmuApi.GetRomInfo();
+			string romPath = info.RomPath;
+			if(string.IsNullOrEmpty(romPath)) return "";
+			return Path.ChangeExtension(romPath, ".context.txt");
+		}
+
+		public void LoadContextFile(string path)
+		{
+			try {
+				_contextText = File.ReadAllText(path);
+				Config.ContextFilePath = path;
+				AddSystemMessage($"Context file loaded: {Path.GetFileName(path)} ({_contextText.Length} chars)");
+			} catch(Exception ex) {
+				AddSystemMessage($"Could not load context file: {ex.Message}");
+			}
+		}
+
+		public void ClearContextFile()
+		{
+			_contextText = "";
+			Config.ContextFilePath = "";
+			AddSystemMessage("Context file cleared.");
+		}
+
+		private void TryAutoLoadContext()
+		{
+			// 1. Use the configured path if set and file exists
+			string configured = Config.ContextFilePath;
+			if(!string.IsNullOrEmpty(configured) && File.Exists(configured)) {
+				try {
+					_contextText = File.ReadAllText(configured);
+					AddSystemMessage($"Context file loaded: {Path.GetFileName(configured)} ({_contextText.Length} chars)");
+					return;
+				} catch { }
+			}
+
+			// 2. Fall back to auto-discovery: {romName}.context.txt next to the ROM
+			string auto = GetAutoContextPath();
+			if(!string.IsNullOrEmpty(auto) && File.Exists(auto)) {
+				try {
+					_contextText = File.ReadAllText(auto);
+					AddSystemMessage($"Context file auto-loaded: {Path.GetFileName(auto)} ({_contextText.Length} chars)");
+					return;
+				} catch { }
+			}
+
+			_contextText = "";
 		}
 
 		// ── History Persistence ───────────────────────────────────────────────
@@ -123,10 +184,11 @@ namespace Mesen.Debugger.ViewModels
 			return Path.Combine(ConfigManager.DebuggerFolder, info.GetRomName() + ".ai.json");
 		}
 
-		private void SaveCurrentHistory()
+		private void SaveCurrentHistory() => SaveHistoryToPath(GetHistoryPath());
+
+		private void SaveHistoryToPath(string path)
 		{
 			try {
-				string path = GetHistoryPath();
 				if(string.IsNullOrEmpty(path)) return;
 
 				var messagesArray = new JsonArray();
@@ -155,12 +217,14 @@ namespace Mesen.Debugger.ViewModels
 
 		private void LoadHistory()
 		{
+			TryAutoLoadContext();
 			try {
-				string path = GetHistoryPath();
-				if(string.IsNullOrEmpty(path) || !File.Exists(path)) {
+				_historyPath = GetHistoryPath();
+				if(string.IsNullOrEmpty(_historyPath) || !File.Exists(_historyPath)) {
 					AddSystemMessage("AI Companion ready. No previous chat history for this ROM.");
 					return;
 				}
+				string path = _historyPath;
 
 				var root = JsonNode.Parse(File.ReadAllText(path)) as JsonObject;
 				if(root == null) { AddSystemMessage("AI Companion ready."); return; }
@@ -172,9 +236,10 @@ namespace Mesen.Debugger.ViewModels
 						string text = obj["text"]?.GetValue<string>() ?? "";
 						DateTime ts = DateTime.TryParse(obj["ts"]?.GetValue<string>(), out var t) ? t : DateTime.Now;
 						var entry = new ChatEntry { Kind = kind, Text = text, Timestamp = ts };
-						Messages.Add(entry);
 						if(kind == ChatEntry.EntryKind.ToolStatus)
 							ToolCallLog.Add(entry);
+						else
+							Messages.Add(entry);
 					}
 				}
 
@@ -333,7 +398,8 @@ Efficiency rules (important — each tool call has an API cost):
 - When annotating multiple functions in one session, batch your set_label calls after analysis rather than interleaving reads and writes for each one.
 - Prefer get_annotation_summary once at the start of a session rather than calling it repeatedly.
 
-Be systematic, thorough, and use your tools freely. Always read the code before labeling it.";
+Be systematic, thorough, and use your tools freely. Always read the code before labeling it."
+			+ (string.IsNullOrWhiteSpace(_contextText) ? "" : $"\n\n## User-supplied context\n\n{_contextText}");
 		}
 
 		private void ClearChat()
@@ -355,7 +421,6 @@ Be systematic, thorough, and use your tools freely. Always read the code before 
 		private void AddToolStatus(string text)
 		{
 			var entry = new ChatEntry { Kind = ChatEntry.EntryKind.ToolStatus, Text = text };
-			Messages.Add(entry);
 			ToolCallLog.Add(entry);
 		}
 

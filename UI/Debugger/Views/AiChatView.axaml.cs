@@ -3,6 +3,7 @@ using Avalonia.Input;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
 using Mesen.Debugger.ViewModels;
+using Mesen.Utilities;
 using System;
 
 namespace Mesen.Debugger.Views
@@ -50,6 +51,14 @@ namespace Mesen.Debugger.Views
 				_model.CancelCommand.Execute().Subscribe();
 			else
 				_model.SendCommand.Execute().Subscribe();
+		}
+
+		private async void OnLoadContextClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+		{
+			if(_model == null) return;
+			string? path = await FileDialogHelper.OpenFile(null, VisualRoot, "txt", "md", "*");
+			if(path != null)
+				_model.LoadContextFile(path);
 		}
 	}
 }

@@ -23,5 +23,6 @@ namespace Mesen.Config
 		[Reactive] public int MaxHistoryTurns { get; set; } = 10;
 		[Reactive] public AiMonitoringMode MonitoringMode { get; set; } = AiMonitoringMode.Queue;
 		[Reactive] public bool ShowToolCalls { get; set; } = true;
+		[Reactive] public string ContextFilePath { get; set; } = "";
 	}
 }
