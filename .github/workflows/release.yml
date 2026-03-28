@@ -13,13 +13,6 @@ env:
 jobs:
   # ── Windows ──────────────────────────────────────────────────────────────
   windows:
-    strategy:
-      matrix:
-        platform: [
-          {netversion: 8.x, targetframework: net8.0, aot: false, singleFile: true,  aotString: "",      assetName: "Mesen2-Diz-Windows-net8.zip"},
-          {netversion: 8.x, targetframework: net8.0, aot: true,  singleFile: false, aotString: " - AoT", assetName: "Mesen2-Diz-Windows-net8-AoT.zip"}
-        ]
-      fail-fast: false
     runs-on: windows-latest
 
     steps:
@@ -29,40 +22,34 @@ jobs:
 
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: ${{ matrix.platform.netversion }}
+          dotnet-version: 8.x
 
       - uses: microsoft/setup-msbuild@v2
         with:
           msbuild-architecture: x64
 
       - name: Restore packages
-        run: dotnet restore -p:TargetFramework="${{ matrix.platform.targetframework }}" -r win-x64 -p:PublishAot="${{ matrix.platform.aot }}" -p:BuildWithNetFrameworkHostedCompiler=true
+        run: dotnet restore -p:TargetFramework="net8.0" -r win-x64
 
       - uses: ./.github/actions/build-sha1-action
 
       - name: Build
-        run: msbuild -nologo -v:m -clp:ForceConsoleColor -m -p:Configuration=Release -p:Platform=x64 -t:Clean,UI -p:TargetFramework="${{ matrix.platform.targetframework }}"
+        run: msbuild -nologo -v:m -clp:ForceConsoleColor -m -p:Configuration=Release -p:Platform=x64 -t:Clean,UI -p:TargetFramework="net8.0"
 
       - name: Publish
-        run: dotnet publish --no-restore -c Release -p:PublishAot="${{ matrix.platform.aot }}" -p:SelfContained="${{ matrix.platform.aot }}" -p:PublishSingleFile="${{ matrix.platform.singleFile }}" -p:OptimizeUi="true" -p:Platform="Any CPU" -p:TargetFramework="${{ matrix.platform.targetframework }}" -r win-x64 Mesen.sln /p:PublishProfile=UI\Properties\PublishProfiles\Release.pubxml
+        run: dotnet publish --no-restore -c Release -p:PublishSingleFile="true" -p:OptimizeUi="true" -p:Platform="Any CPU" -p:TargetFramework="net8.0" -r win-x64 Mesen.sln /p:PublishProfile=UI\Properties\PublishProfiles\Release.pubxml
 
       - name: Zip
-        run: Compress-Archive -Path build/TmpReleaseBuild/Mesen.exe -DestinationPath ${{ matrix.platform.assetName }}
+        run: Compress-Archive -Path build/TmpReleaseBuild/Mesen.exe -DestinationPath Mesen2-Diz-Windows-net8.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-${{ matrix.platform.targetframework }}${{ matrix.platform.aotString }}
-          path: ${{ matrix.platform.assetName }}
+          name: windows-net8
+          path: Mesen2-Diz-Windows-net8.zip
 
   # ── Linux ─────────────────────────────────────────────────────────────────
   linux:
-    strategy:
-      matrix:
-        platform: [
-          {os: ubuntu-22.04, arch: x64,   assetName: "Mesen2-Diz-Linux-x64.zip"}
-        ]
-      fail-fast: false
-    runs-on: ${{ matrix.platform.os }}
+    runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@v4
@@ -86,51 +73,16 @@ jobs:
         run: make -j$(nproc) -O LTO=true STATICLINK=true SYSTEM_LIBEVDEV=false
 
       - name: Zip
-        run: |
-          zip -j ${{ matrix.platform.assetName }} \
-            bin/linux-${{ matrix.platform.arch }}/Release/linux-${{ matrix.platform.arch }}/publish/Mesen
+        run: zip -j Mesen2-Diz-Linux-x64.zip bin/linux-x64/Release/linux-x64/publish/Mesen
 
       - uses: actions/upload-artifact@v4
         with:
-          name: linux-${{ matrix.platform.arch }}
-          path: ${{ matrix.platform.assetName }}
-
-  # ── Linux AppImage ────────────────────────────────────────────────────────
-  appimage:
-    runs-on: ubuntu-22.04
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 8.x
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update -qy
-          sudo apt-get install -qy libsdl2-dev libfuse2 ccache
-
-      - uses: ./.github/actions/setup-ccache-action
-
-      - uses: ./.github/actions/build-sha1-action
-
-      - name: Build AppImage
-        run: Linux/appimage/appimage.sh
-
-      - name: Rename AppImage
-        run: mv Mesen.AppImage Mesen2-Diz-Linux-x64.AppImage
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux-appimage
-          path: Mesen2-Diz-Linux-x64.AppImage
+          name: linux-x64
+          path: Mesen2-Diz-Linux-x64.zip
 
   # ── Create GitHub Release ─────────────────────────────────────────────────
   release:
-    needs: [windows, linux, appimage]
+    needs: [windows, linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -158,9 +110,7 @@ jobs:
           ### Downloads
           | File | Platform |
           |------|----------|
-          | \`Mesen2-Diz-Windows-net8-AoT.zip\` | Windows (recommended — no .NET required) |
           | \`Mesen2-Diz-Windows-net8.zip\` | Windows (.NET 8 required) |
-          | \`Mesen2-Diz-Linux-x64.AppImage\` | Linux x64 AppImage (recommended) |
-          | \`Mesen2-Diz-Linux-x64.zip\` | Linux x64 binary |
+          | \`Mesen2-Diz-Linux-x64.zip\` | Linux x64 |
           " \
             artifacts/*
