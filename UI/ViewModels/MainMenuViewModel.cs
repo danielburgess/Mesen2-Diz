@@ -1013,6 +1013,10 @@ namespace Mesen.ViewModels
 					ActionType = ActionType.OpenRomMapViewer,
 					OnClick = () => DebugWindowManager.GetOrOpenDebugWindow(() => new RomMapWindow(false))
 				},
+				new ContextMenuAction() {
+					ActionType = ActionType.OpenAiCompanion,
+					OnClick = () => DebugWindowManager.GetOrOpenDebugWindow(() => new AiCompanionWindow(new Mesen.Debugger.ViewModels.AiCompanionViewModel()))
+				},
 				new ContextMenuSeparator(),
 				new ContextMenuAction() {
 					ActionType = ActionType.OpenAssembler,

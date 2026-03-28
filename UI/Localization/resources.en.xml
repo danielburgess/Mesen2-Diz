@@ -1116,6 +1116,10 @@
 			<Control ID="btnClose">Close</Control>
 		</Form>
 
+		<Form ID="AiCompanionWindow">
+			<Control ID="wndTitle">AI Companion</Control>
+		</Form>
+
 		<Form ID="RomMapWindow">
 			<Control ID="wndTitle">ROM Map</Control>
 			<Control ID="mnuFile">_File</Control>
@@ -3254,6 +3258,7 @@ E
 			<Value ID="OpenSpriteViewer">Open Sprite Viewer</Value>
 			<Value ID="OpenPaletteViewer">Open Palette Viewer</Value>
 			<Value ID="OpenRomMapViewer">Open ROM Map</Value>
+			<Value ID="OpenAiCompanion">Open AI Companion</Value>
 			<Value ID="FindReplaceInComments">Find/Replace in Comments</Value>
 			<Value ID="ToggleInlineLabelEdit">Inline Label Editing</Value>
 			<Value ID="Reset">Reset</Value>
@@ -3540,6 +3545,7 @@ E
 			<Value ID="OpenSpriteViewer">Sprite Viewer</Value>
 			<Value ID="OpenPaletteViewer">Palette Viewer</Value>
 			<Value ID="OpenRomMapViewer">ROM Map</Value>
+			<Value ID="OpenAiCompanion">AI Companion</Value>
 			<Value ID="FindReplaceInComments">Find/Replace Comments</Value>
 			<Value ID="ToggleInlineLabelEdit">Inline Editing</Value>
 			<Value ID="OpenDebugSettings">Settings</Value>

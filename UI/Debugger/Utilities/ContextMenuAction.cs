@@ -545,6 +545,9 @@ namespace Mesen.Debugger.Utilities
 		[IconFile("RomMap")]
 		OpenRomMapViewer,
 
+		[IconFile("Find")]
+		OpenAiCompanion,
+
 		[IconFile("Chip")]
 		OpenAssembler,
 		

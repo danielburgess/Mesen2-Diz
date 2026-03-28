@@ -33,6 +33,7 @@ namespace Mesen.Config
 		public AssemblerConfig Assembler { get; set; } = new();
 		public DebugLogConfig DebugLog { get; set; } = new();
 		public RomMapViewerConfig RomMapViewer { get; set; } = new();
+		public AiCompanionConfig AiCompanion { get; set; } = new();
 		public DebuggerFontConfig Fonts { get; set; } = new();
 
 		public DebugConfig()
