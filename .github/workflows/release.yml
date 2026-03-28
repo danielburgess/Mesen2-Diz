@@ -128,54 +128,9 @@ jobs:
           name: linux-appimage
           path: Mesen2-Diz-Linux-x64.AppImage
 
-  # ── macOS ─────────────────────────────────────────────────────────────────
-  macos:
-    strategy:
-      matrix:
-        platform: [
-          {os: macos-14, arch: arm64, assetName: "Mesen2-Diz-macOS-AppleSilicon.zip"}
-        ]
-      fail-fast: false
-    runs-on: ${{ matrix.platform.os }}
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 8.x
-
-      - name: Install dependencies
-        run: brew install sdl2 ccache
-
-      - name: Get brew prefix
-        run: echo "brewPrefix=$(brew --prefix)" >> "$GITHUB_ENV"
-
-      - uses: ./.github/actions/setup-ccache-action
-        with:
-          ccache-path: '${{ env.brewPrefix }}/opt/ccache/libexec'
-
-      - uses: ./.github/actions/build-sha1-action
-
-      - name: Build
-        run: make -j$(sysctl -n hw.logicalcpu)
-
-      - name: Zip
-        run: |
-          ditto -c -k --sequesterRsrc --keepParent \
-            bin/osx-${{ matrix.platform.arch }}/Release/osx-${{ matrix.platform.arch }}/publish/Mesen.app \
-            ${{ matrix.platform.assetName }}
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos-${{ matrix.platform.arch }}
-          path: ${{ matrix.platform.assetName }}
-
   # ── Create GitHub Release ─────────────────────────────────────────────────
   release:
-    needs: [windows, linux, appimage, macos]
+    needs: [windows, linux, appimage]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -207,6 +162,5 @@ jobs:
           | \`Mesen2-Diz-Windows-net8.zip\` | Windows (.NET 8 required) |
           | \`Mesen2-Diz-Linux-x64.AppImage\` | Linux x64 AppImage (recommended) |
           | \`Mesen2-Diz-Linux-x64.zip\` | Linux x64 binary |
-          | \`Mesen2-Diz-macOS-AppleSilicon.zip\` | macOS Apple Silicon (Mesen.app) |
           " \
             artifacts/*
