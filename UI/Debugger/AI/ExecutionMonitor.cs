@@ -1,5 +1,6 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Runtime.InteropServices;
 using Mesen.Debugger.Labels;
 using Mesen.Interop;
 
@@ -30,6 +31,7 @@ namespace Mesen.Debugger.AI
 	/// <summary>
 	/// Monitors CDL data on each PPU frame boundary, detects newly-executed
 	/// unannotated branch/sub-entry targets, and queues them for AI review.
+	/// Also fires when a user breakpoint is hit.
 	/// </summary>
 	public class ExecutionMonitor : IDisposable
 	{
@@ -41,6 +43,12 @@ namespace Mesen.Debugger.AI
 
 		/// <summary>Fires when a new item is added to the queue.</summary>
 		public event Action<ReviewQueueItem>? OnNewItem;
+
+		/// <summary>
+		/// Fires when a user breakpoint is hit (BreakSource.Breakpoint only).
+		/// Raised on the notification thread — dispatch to UI thread before touching UI.
+		/// </summary>
+		public event Action<BreakEvent, uint>? OnBreakpointHit;
 
 		public ExecutionMonitor()
 		{
@@ -79,6 +87,15 @@ namespace Mesen.Debugger.AI
 
 		private void OnNotification(NotificationEventArgs e)
 		{
+			if(e.NotificationType == ConsoleNotificationType.CodeBreak) {
+				var evt = Marshal.PtrToStructure<BreakEvent>(e.Parameter);
+				if(evt.Source == BreakSource.Breakpoint && evt.SourceCpu == CpuType.Snes) {
+					uint pc = (uint)DebugApi.GetProgramCounter(CpuType.Snes, true);
+					OnBreakpointHit?.Invoke(evt, pc);
+				}
+				return;
+			}
+
 			if(!_monitoring) return;
 			if(e.NotificationType != ConsoleNotificationType.PpuFrameDone) return;
 

@@ -44,6 +44,7 @@ namespace Mesen.Debugger.ViewModels
 		[Reactive] public string InputText { get; set; } = "";
 		[Reactive] public string StatusText { get; private set; } = "Ready";
 		[Reactive] public bool ReviewQueueHasItems { get; private set; }
+		[Reactive] public bool ChatScrollLocked { get; set; } = true;
 
 		public ObservableCollection<ChatEntry> Messages { get; } = new();
 		public ObservableCollection<ChatEntry> ToolCallLog { get; } = new();
@@ -78,6 +79,7 @@ namespace Mesen.Debugger.ViewModels
 			ReviewQueue = _monitor.Queue;
 
 			_monitor.OnNewItem += OnMonitorNewItem;
+		_monitor.OnBreakpointHit += OnBreakpointHit;
 			ReviewQueue.CollectionChanged += (_, _) => ReviewQueueHasItems = ReviewQueue.Count > 0;
 
 			var canSend = this.WhenAnyValue(
@@ -282,33 +284,45 @@ namespace Mesen.Debugger.ViewModels
 		private async Task RunTurnAsync(string userMessage)
 		{
 			if(string.IsNullOrEmpty(Config.ApiKey)) {
-				AddEntry(ChatEntry.EntryKind.Error, "API key not set. Enter your Anthropic API key in the Settings panel (gear icon).");
+				Dispatcher.UIThread.Post(() => AddEntry(ChatEntry.EntryKind.Error, "API key not set. Enter your Anthropic API key in the Settings panel (gear icon)."));
 				return;
 			}
 
-			IsBusy = true;
-			_cts = new CancellationTokenSource();
+			var cts = new CancellationTokenSource();
+			_cts = cts;
 
-			// Add user message to display and history
-			AddEntry(ChatEntry.EntryKind.User, userMessage);
+			// Capture config values on calling thread before any await
+			string apiKey = Config.ApiKey;
+			string model = Config.Model;
+			int maxTokens = Config.MaxTokens;
+			int maxHistoryTurns = Config.MaxHistoryTurns;
+			int maxToolCallsPerTurn = Config.MaxToolCallsPerTurn;
+			bool showToolCalls = Config.ShowToolCalls;
+			string systemPrompt = BuildSystemPrompt();
+
+			// Add user message to history (API state — thread-safe list)
 			_history.Add(new JsonObject {
 				["role"] = "user",
 				["content"] = new JsonArray { (JsonNode)new JsonObject { ["type"] = "text", ["text"] = userMessage } }
 			});
 
-			// Placeholder for streaming assistant response
-			var assistantEntry = new ChatEntry { Kind = ChatEntry.EntryKind.Assistant, IsStreaming = true };
-			Messages.Add(assistantEntry);
+			// All UI mutations on UI thread
+			ChatEntry assistantEntry = new ChatEntry { Kind = ChatEntry.EntryKind.Assistant, IsStreaming = true };
+			await Dispatcher.UIThread.InvokeAsync(() => {
+				IsBusy = true;
+				StatusText = "Claude is thinking...";
+				AddEntry(ChatEntry.EntryKind.User, userMessage);
+				Messages.Add(assistantEntry);
+			});
 
 			try {
-				StatusText = "Claude is thinking...";
-
 				await _client.RunTurnAsync(
-					apiKey: Config.ApiKey,
-					model: Config.Model,
-					maxTokens: Config.MaxTokens,
-					maxHistoryTurns: Config.MaxHistoryTurns,
-					systemPrompt: BuildSystemPrompt(),
+					apiKey: apiKey,
+					model: model,
+					maxTokens: maxTokens,
+					maxHistoryTurns: maxHistoryTurns,
+					maxToolCallsPerTurn: maxToolCallsPerTurn,
+					systemPrompt: systemPrompt,
 					messages: _history,
 					tools: _tools.GetDefinitions(),
 					toolExecutor: (name, input) => _tools.ExecuteAsync(name, input),
@@ -316,29 +330,37 @@ namespace Mesen.Debugger.ViewModels
 						Dispatcher.UIThread.Post(() => assistantEntry.AppendText(delta));
 					},
 					onToolStatus: status => {
-						if(Config.ShowToolCalls) {
-							Dispatcher.UIThread.Post(() =>
-								AddToolStatus(status));
+						if(showToolCalls) {
+							Dispatcher.UIThread.Post(() => AddToolStatus(status));
 						}
 					},
-					ct: _cts.Token);
+					ct: cts.Token);
 
-				assistantEntry.IsStreaming = false;
-				StatusText = "Ready";
+				Dispatcher.UIThread.Post(() => {
+					assistantEntry.IsStreaming = false;
+					StatusText = "Ready";
+				});
 			} catch(OperationCanceledException) {
-				assistantEntry.IsStreaming = false;
-				assistantEntry.AppendText("\n[Cancelled]");
-				StatusText = "Cancelled";
+				Dispatcher.UIThread.Post(() => {
+					assistantEntry.IsStreaming = false;
+					assistantEntry.AppendText("\n[Cancelled]");
+					StatusText = "Cancelled";
+				});
 			} catch(Exception ex) {
-				assistantEntry.IsStreaming = false;
-				if(string.IsNullOrEmpty(assistantEntry.Text))
-					Messages.Remove(assistantEntry);
-				AddEntry(ChatEntry.EntryKind.Error, $"Error: {ex.Message}");
-				StatusText = "Error";
+				string errorMsg = ex.Message;
+				Dispatcher.UIThread.Post(() => {
+					assistantEntry.IsStreaming = false;
+					if(string.IsNullOrEmpty(assistantEntry.Text))
+						Messages.Remove(assistantEntry);
+					AddEntry(ChatEntry.EntryKind.Error, $"Error: {errorMsg}");
+					StatusText = "Error";
+				});
 			} finally {
-				IsBusy = false;
-				_cts?.Dispose();
-				_cts = null;
+				Dispatcher.UIThread.Post(() => {
+					IsBusy = false;
+					cts.Dispose();
+					_cts = null;
+				});
 			}
 		}
 
@@ -355,6 +377,23 @@ namespace Mesen.Debugger.ViewModels
 			});
 		}
 
+		private void OnBreakpointHit(BreakEvent evt, uint pc)
+		{
+			if(Config.MonitoringMode == AiMonitoringMode.Disabled) return;
+
+			Dispatcher.UIThread.Post(() => {
+				if(IsBusy) return;  // Already mid-query; don't interrupt
+
+				string prompt = $"[Breakpoint hit at ${pc:X6} (breakpoint #{evt.BreakpointId})] " +
+				                $"The emulator has paused at this address. " +
+				                $"Read the CPU state and disassembly at ${pc:X6}, identify what code is running here, " +
+				                $"and apply labels/comments if the address is unannotated.";
+
+				StatusText = $"Breakpoint hit at ${pc:X6}";
+				_ = RunTurnAsync(prompt);
+			});
+		}
+
 		private string BuildSystemPrompt()
 		{
 			int romSize = DebugApi.GetMemorySize(MemoryType.SnesPrgRom);
@@ -368,13 +407,18 @@ namespace Mesen.Debugger.ViewModels
 
 You have access to tools that let you:
 - Read disassembly at any address (get_disassembly)
-- Read emulated RAM, ROM, and memory regions (read_memory)
+- Read any emulated memory region: CPU bus, WRAM, VRAM, OAM, CGRAM, ROM (read_memory)
+- Write to any emulated memory region, including WRAM, VRAM, OAM, CGRAM (write_memory)
 - View Code/Data Logger (CDL) coverage flags per ROM byte (get_cdl_data)
 - Add, modify, or delete labels and comments (set_label, delete_label)
 - View all existing labels (get_labels, get_label_at)
 - Read the current call stack (get_call_stack)
 - Get annotation coverage statistics (get_annotation_summary)
 - Queue addresses for deferred review (add_to_review_queue)
+- Pause, resume, soft-reset, and power-cycle the emulator (pause_emulation, resume_emulation, reset_game)
+- Set and remove execution/read/write breakpoints (set_breakpoint, remove_breakpoint, list_breakpoints)
+- Read all 65816 CPU registers and flags (get_cpu_state)
+- Modify any CPU register or the processor status flags byte (set_cpu_registers — requires paused emulation)
 
 SNES / 65816 architecture notes:
 - 24-bit address space: bank (8 bits) + offset (16 bits), written as $BBAAAA
@@ -398,7 +442,20 @@ Efficiency rules (important — each tool call has an API cost):
 - When annotating multiple functions in one session, batch your set_label calls after analysis rather than interleaving reads and writes for each one.
 - Prefer get_annotation_summary once at the start of a session rather than calling it repeatedly.
 
-Be systematic, thorough, and use your tools freely. Always read the code before labeling it."
+When to stop and ask the user:
+- If you need the game to be running or at a specific point (e.g. a level loaded, an animation triggered) before the relevant code will appear in CDL or disassembly, STOP and ask the user to do that first. Do not loop through tool calls trying to find code that may not be reachable yet.
+- If a task is ambiguous (e.g. ""enemy animations"" could refer to multiple systems), ask the user which one before proceeding. Do not pick one arbitrarily.
+- If you have made 5+ tool calls and still cannot find a clear entry point for the requested feature, STOP and tell the user what you found and what you need from them. Do not keep searching indefinitely.
+- If you finish one task and there is no clear next step explicitly requested, STOP and report results. Do not invent follow-on tasks.
+- Never repeat the same get_disassembly or read_memory call twice in one session.
+
+Communication style:
+- Be concise. Give direct answers without preamble, restating the question, or filler phrases.
+- Report findings as a short list: address, name assigned, one-line reason. Skip lengthy prose.
+- If you cannot complete a task, say so in one sentence and ask the specific question needed to unblock you.
+- Do not summarize what you are about to do — just do it, then briefly report what you did.
+
+Be systematic. Always read the code before labeling it."
 			+ (string.IsNullOrWhiteSpace(_contextText) ? "" : $"\n\n## User-supplied context\n\n{_contextText}");
 		}
 
@@ -432,6 +489,7 @@ Be systematic, thorough, and use your tools freely. Always read the code before 
 			_cts?.Cancel();
 			SaveCurrentHistory();
 			_monitor.OnNewItem -= OnMonitorNewItem;
+			_monitor.OnBreakpointHit -= OnBreakpointHit;
 			_monitor.Dispose();
 			_client.Dispose();
 		}

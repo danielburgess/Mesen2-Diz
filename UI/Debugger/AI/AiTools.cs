@@ -5,9 +5,11 @@ using System.Text;
 using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 using Avalonia.Threading;
+using Mesen.Debugger;
 using Mesen.Debugger.Labels;
 using Mesen.Debugger.Utilities;
 using Mesen.Interop;
+using Mesen.Utilities;
 
 namespace Mesen.Debugger.AI
 {
@@ -125,6 +127,74 @@ namespace Mesen.Debugger.AI
 					["address"] = Prop("string", "SNES CPU address as hex string"),
 					["reason"] = Prop("string", "Why this address needs review")
 				}, new[] { "address", "reason" })),
+
+		// ── Emulation control ──────────────────────────────────────────────
+
+		Tool("pause_emulation",
+			"Pause the emulator. Required before reading or modifying CPU registers.",
+			new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() }),
+
+		Tool("resume_emulation",
+			"Resume emulation from a paused or breakpoint-stopped state.",
+			new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() }),
+
+		Tool("reset_game",
+			"Reset the currently loaded game.",
+			Schema("", new() {
+				["type"] = Prop("string", ""soft" = SNES reset button (default); "hard" = power cycle (full restart)")
+			}, Array.Empty<string>())),
+
+		// ── Breakpoints ────────────────────────────────────────────────────
+
+		Tool("list_breakpoints",
+			"List all currently active breakpoints.",
+			new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() }),
+
+		Tool("set_breakpoint",
+			"Add a breakpoint. Emulation pauses when the condition is met.",
+			Schema("", new() {
+				["address"]     = Prop("string",  "SNES CPU address as hex string ($BBAAAA)"),
+				["break_on"]    = Prop("string",  ""exec" (default), "read", "write", "read_write", or "all""),
+				["memory_type"] = Prop("string",  ""cpu" (default, CPU bus), "work_ram", "save_ram", "vram", "oam", "cgram""),
+				["condition"]   = Prop("string",  "Optional condition expression (e.g. "A == $10")")
+			}, new[] { "address" })),
+
+		Tool("remove_breakpoint",
+			"Remove all breakpoints at the given address.",
+			Schema("", new() {
+				["address"]     = Prop("string", "SNES CPU address as hex string"),
+				["memory_type"] = Prop("string", "Memory space (default: "cpu")")
+			}, new[] { "address" })),
+
+		// ── Memory write ───────────────────────────────────────────────────
+
+		Tool("write_memory",
+			"Write bytes to emulated memory. Takes effect immediately, even while running.",
+			Schema("", new() {
+				["address"]     = Prop("string", "Start address as hex string"),
+				["data"]        = Prop("string", "Bytes as space-separated hex pairs, e.g. "A9 00 85 7E""),
+				["memory_type"] = Prop("string", ""cpu" (default), "work_ram", "save_ram", "vram", "oam", "cgram", "prg_rom"")
+			}, new[] { "address", "data" })),
+
+		// ── CPU state ──────────────────────────────────────────────────────
+
+		Tool("get_cpu_state",
+			"Get all 65816 CPU registers and processor status flags. Pause emulation first for a stable snapshot.",
+			new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() }),
+
+		Tool("set_cpu_registers",
+			"Set one or more 65816 CPU registers or the full status flags byte. Emulation must be paused. Only provided fields are modified.",
+			Schema("", new() {
+				["a"]   = Prop("integer", "Accumulator (0-65535)"),
+				["x"]   = Prop("integer", "X index register (0-65535)"),
+				["y"]   = Prop("integer", "Y index register (0-65535)"),
+				["sp"]  = Prop("integer", "Stack pointer (0-65535)"),
+				["d"]   = Prop("integer", "Direct page register (0-65535)"),
+				["pc"]  = Prop("integer", "Program counter offset within bank K (0-65535)"),
+				["k"]   = Prop("integer", "Program bank register (0-255)"),
+				["dbr"] = Prop("integer", "Data bank register (0-255)"),
+				["ps"]  = Prop("integer", "Processor status byte: bit0=C bit1=Z bit2=I bit3=D bit4=X(idx8) bit5=M(mem8) bit6=V bit7=N")
+			}, Array.Empty<string>())),
 		};
 
 		// ── Tool executor ─────────────────────────────────────────────────────
@@ -148,7 +218,16 @@ namespace Mesen.Debugger.AI
 					"delete_label" => DoDeleteLabel(input),
 					"get_call_stack" => DoGetCallStack(),
 					"get_annotation_summary" => DoGetAnnotationSummary(),
-					"add_to_review_queue" => DoAddToReviewQueue(input),
+					"add_to_review_queue"  => DoAddToReviewQueue(input),
+					"pause_emulation"      => DoPauseEmulation(),
+					"resume_emulation"     => DoResumeEmulation(),
+					"reset_game"           => DoResetGame(input),
+					"list_breakpoints"     => DoListBreakpoints(),
+					"set_breakpoint"       => DoSetBreakpoint(input),
+					"remove_breakpoint"    => DoRemoveBreakpoint(input),
+					"write_memory"         => DoWriteMemory(input),
+					"get_cpu_state"        => DoGetCpuState(),
+					"set_cpu_registers"    => DoSetCpuRegisters(input),
 					_ => $"Unknown tool: {name}"
 				};
 			} catch(Exception ex) {
@@ -382,6 +461,166 @@ namespace Mesen.Debugger.AI
 			return $"Added ${addr:X6} to review queue: {reason}";
 		}
 
+		// ── Emulation control implementations ────────────────────────────────
+
+		private static string DoPauseEmulation()
+		{
+			if(EmuApi.IsPaused()) return "Emulation is already paused.";
+			EmuApi.Pause();
+			return "Emulation paused.";
+		}
+
+		private static string DoResumeEmulation()
+		{
+			if(!EmuApi.IsPaused()) return "Emulation is already running.";
+			DebugApi.ResumeExecution();
+			return "Emulation resumed.";
+		}
+
+		private static string DoResetGame(JsonObject input)
+		{
+			string type = input["type"]?.GetValue<string>() ?? "soft";
+			if(type == "hard") {
+				LoadRomHelper.PowerCycle();
+				return "Hard reset (power cycle) triggered.";
+			} else {
+				LoadRomHelper.Reset();
+				return "Soft reset triggered.";
+			}
+		}
+
+		// ── Breakpoint implementations ────────────────────────────────────────
+
+		private static string DoListBreakpoints()
+		{
+			var bps = BreakpointManager.Breakpoints;
+			if(bps.Count == 0) return "No breakpoints set.";
+
+			var sb = new StringBuilder();
+			sb.AppendLine($"{bps.Count} breakpoint(s):");
+			foreach(var bp in bps) {
+				var types = new List<string>();
+				if(bp.BreakOnExec) types.Add("Exec");
+				if(bp.BreakOnRead) types.Add("Read");
+				if(bp.BreakOnWrite) types.Add("Write");
+				string range = bp.StartAddress == bp.EndAddress
+					? $"${bp.StartAddress:X6}"
+					: $"${bp.StartAddress:X6}–${bp.EndAddress:X6}";
+				string cond = bp.Condition.Length > 0 ? $"  cond: {bp.Condition}" : "";
+				string en = bp.Enabled ? "" : " [disabled]";
+				sb.AppendLine($"  {range}  {bp.MemoryType}  [{string.Join("|", types)}]{cond}{en}");
+			}
+			return sb.ToString();
+		}
+
+		private static string DoSetBreakpoint(JsonObject input)
+		{
+			uint addr = ParseAddress(input["address"]?.GetValue<string>() ?? "0");
+			string breakOn = input["break_on"]?.GetValue<string>() ?? "exec";
+			string condition = input["condition"]?.GetValue<string>() ?? "";
+			MemoryType memType = ParseMemoryType(input["memory_type"]?.GetValue<string>() ?? "cpu");
+
+			var bp = new Breakpoint {
+				StartAddress = addr,
+				EndAddress = addr,
+				MemoryType = memType,
+				CpuType = CpuType.Snes,
+				Enabled = true,
+				BreakOnExec  = breakOn is "exec" or "all",
+				BreakOnRead  = breakOn is "read" or "read_write" or "all",
+				BreakOnWrite = breakOn is "write" or "read_write" or "all",
+				Condition = condition
+			};
+
+			BreakpointManager.AddBreakpoint(bp);
+			return $"Breakpoint set at ${addr:X6} ({memType}, {breakOn}).";
+		}
+
+		private static string DoRemoveBreakpoint(JsonObject input)
+		{
+			uint addr = ParseAddress(input["address"]?.GetValue<string>() ?? "0");
+			MemoryType memType = ParseMemoryType(input["memory_type"]?.GetValue<string>() ?? "cpu");
+
+			var toRemove = BreakpointManager.Breakpoints
+				.Where(bp => bp.StartAddress == addr && bp.MemoryType == memType)
+				.ToList();
+
+			if(toRemove.Count == 0)
+				return $"No breakpoint found at ${addr:X6} ({memType}).";
+
+			BreakpointManager.RemoveBreakpoints(toRemove);
+			return $"Removed {toRemove.Count} breakpoint(s) at ${addr:X6}.";
+		}
+
+		// ── Memory write implementation ───────────────────────────────────────
+
+		private static string DoWriteMemory(JsonObject input)
+		{
+			uint addr = ParseAddress(input["address"]?.GetValue<string>() ?? "0");
+			string dataStr = input["data"]?.GetValue<string>() ?? "";
+			MemoryType memType = ParseMemoryType(input["memory_type"]?.GetValue<string>() ?? "cpu");
+
+			byte[] data = ParseHexBytes(dataStr);
+			if(data.Length == 0) return "No data to write (provide bytes as hex pairs, e.g. \"A9 00 60\").";
+
+			int memSize = DebugApi.GetMemorySize(memType);
+			if(memSize <= 0) return $"Memory type not available.";
+			if(addr + data.Length > memSize)
+				return $"Write would exceed memory size ({memSize} bytes). Truncate or adjust address.";
+
+			DebugApi.SetMemoryValues(memType, addr, data, data.Length);
+			return $"Wrote {data.Length} byte(s) to {memType}:${addr:X6}.";
+		}
+
+		// ── CPU state implementations ─────────────────────────────────────────
+
+		private static string DoGetCpuState()
+		{
+			if(DebugApi.GetMemorySize(MemoryType.SnesPrgRom) <= 0)
+				return "No SNES ROM loaded.";
+
+			var s = DebugApi.GetCpuState<SnesCpuState>(CpuType.Snes);
+			var f = s.PS;
+			bool n = (f & SnesCpuFlags.Negative)   != 0;
+			bool v = (f & SnesCpuFlags.Overflow)    != 0;
+			bool m = (f & SnesCpuFlags.MemoryMode8) != 0;
+			bool x = (f & SnesCpuFlags.IndexMode8)  != 0;
+			bool d = (f & SnesCpuFlags.Decimal)     != 0;
+			bool i = (f & SnesCpuFlags.IrqDisable)  != 0;
+			bool z = (f & SnesCpuFlags.Zero)        != 0;
+			bool c = (f & SnesCpuFlags.Carry)       != 0;
+
+			return $"PC: ${s.K:X2}:{s.PC:X4}  SP: ${s.SP:X4}  D: ${s.D:X4}  DBR: ${s.DBR:X2}\n" +
+			       $"A:  ${s.A:X4}  X: ${s.X:X4}  Y: ${s.Y:X4}\n" +
+			       $"PS: ${(byte)s.PS:X2}  N={n.B()} V={v.B()} M={m.B()} X={x.B()} D={d.B()} I={i.B()} Z={z.B()} C={c.B()}\n" +
+			       $"Mode: {(s.EmulationMode ? "6502 Emulation" : "65816 Native")}  Stop: {s.StopState}";
+		}
+
+		private static string DoSetCpuRegisters(JsonObject input)
+		{
+			if(!EmuApi.IsPaused())
+				return "Error: emulation must be paused before setting CPU registers. Call pause_emulation first.";
+			if(DebugApi.GetMemorySize(MemoryType.SnesPrgRom) <= 0)
+				return "No SNES ROM loaded.";
+
+			var s = DebugApi.GetCpuState<SnesCpuState>(CpuType.Snes);
+			var changed = new List<string>();
+
+			if(input["a"]   != null) { s.A   = (ushort)input["a"]!.GetValue<int>();   changed.Add($"A=${s.A:X4}"); }
+			if(input["x"]   != null) { s.X   = (ushort)input["x"]!.GetValue<int>();   changed.Add($"X=${s.X:X4}"); }
+			if(input["y"]   != null) { s.Y   = (ushort)input["y"]!.GetValue<int>();   changed.Add($"Y=${s.Y:X4}"); }
+			if(input["sp"]  != null) { s.SP  = (ushort)input["sp"]!.GetValue<int>();  changed.Add($"SP=${s.SP:X4}"); }
+			if(input["d"]   != null) { s.D   = (ushort)input["d"]!.GetValue<int>();   changed.Add($"D=${s.D:X4}"); }
+			if(input["pc"]  != null) { s.PC  = (ushort)input["pc"]!.GetValue<int>();  changed.Add($"PC=${s.PC:X4}"); }
+			if(input["k"]   != null) { s.K   = (byte)input["k"]!.GetValue<int>();     changed.Add($"K=${s.K:X2}"); }
+			if(input["dbr"] != null) { s.DBR = (byte)input["dbr"]!.GetValue<int>();   changed.Add($"DBR=${s.DBR:X2}"); }
+			if(input["ps"]  != null) { s.PS  = (SnesCpuFlags)input["ps"]!.GetValue<int>(); changed.Add($"PS=${(byte)s.PS:X2}"); }
+
+			if(changed.Count == 0) return "No register fields provided — nothing changed.";
+			DebugApi.SetCpuState(s, CpuType.Snes);
+			return $"CPU registers updated: {string.Join(", ", changed)}.";
+		}
+
 		// ── Helpers ───────────────────────────────────────────────────────────
 
 		private static uint ParseAddress(string s)
@@ -391,5 +630,32 @@ namespace Mesen.Debugger.AI
 				s = s.Substring(2);
 			return Convert.ToUInt32(s, 16);
 		}
+
+		private static MemoryType ParseMemoryType(string s) => s switch {
+			"prg_rom"  => MemoryType.SnesPrgRom,
+			"work_ram" => MemoryType.SnesWorkRam,
+			"save_ram" => MemoryType.SnesSaveRam,
+			"vram"     => MemoryType.SnesVideoRam,
+			"oam"      => MemoryType.SnesSpriteRam,
+			"cgram"    => MemoryType.SnesCgRam,
+			_          => MemoryType.SnesMemory
+		};
+
+		private static byte[] ParseHexBytes(string s)
+		{
+			// Strip separators and 0x prefixes, then group into byte pairs
+			s = s.Replace("0x", "").Replace(",", "").Replace(" ", "").Trim();
+			if(s.Length % 2 != 0) s = "0" + s;  // pad odd nibble
+			var result = new byte[s.Length / 2];
+			for(int i = 0; i < result.Length; i++)
+				result[i] = Convert.ToByte(s.Substring(i * 2, 2), 16);
+			return result;
+		}
 	}
+}
+
+// Extension to format bool as "0"/"1" for flag display
+internal static class BoolExt
+{
+	public static string B(this bool v) => v ? "1" : "0";
 }

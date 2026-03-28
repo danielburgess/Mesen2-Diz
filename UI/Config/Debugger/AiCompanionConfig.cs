@@ -21,6 +21,7 @@ namespace Mesen.Config
 		};
 		[Reactive] public int MaxTokens { get; set; } = 4096;
 		[Reactive] public int MaxHistoryTurns { get; set; } = 10;
+		[Reactive] public int MaxToolCallsPerTurn { get; set; } = 20;
 		[Reactive] public AiMonitoringMode MonitoringMode { get; set; } = AiMonitoringMode.Queue;
 		[Reactive] public bool ShowToolCalls { get; set; } = true;
 		[Reactive] public string ContextFilePath { get; set; } = "";

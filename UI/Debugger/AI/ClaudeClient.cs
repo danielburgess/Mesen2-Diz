@@ -41,6 +41,7 @@ namespace Mesen.Debugger.AI
 			string model,
 			int maxTokens,
 			int maxHistoryTurns,
+			int maxToolCallsPerTurn,
 			string systemPrompt,
 			List<JsonObject> messages,
 			List<JsonObject> tools,
@@ -49,6 +50,7 @@ namespace Mesen.Debugger.AI
 			Action<string> onToolStatus,
 			CancellationToken ct)
 		{
+			int toolCallCount = 0;
 			while(true) {
 				ct.ThrowIfCancellationRequested();
 
@@ -94,6 +96,24 @@ namespace Mesen.Debugger.AI
 					["role"] = "user",
 					["content"] = toolResultContent
 				});
+
+				toolCallCount += toolUses.Count;
+				if(maxToolCallsPerTurn > 0 && toolCallCount >= maxToolCallsPerTurn) {
+					onToolStatus($"[tool call limit ({maxToolCallsPerTurn}) reached]");
+					// Inject a system notice, then do one final no-tools request so Claude summarises
+					messages.Add(new JsonObject {
+						["role"] = "user",
+						["content"] = new JsonArray {
+							(JsonNode)new JsonObject {
+								["type"] = "text",
+								["text"] = $"[System: the tool call limit of {maxToolCallsPerTurn} for this turn has been reached. Stop using tools now. Summarize what you have done and what still needs to be done. If you need the user to take an action first (such as running the game to a specific point so the code is reachable), say so explicitly and wait for their reply.]"
+							}
+						}
+					});
+					await StreamOneRequest(
+						apiKey, model, maxTokens, systemPrompt, TrimHistory(messages, maxHistoryTurns), new List<JsonObject>(), onTextDelta, ct);
+					break;
+				}
 				// Loop: send again with tool results
 			}
 		}

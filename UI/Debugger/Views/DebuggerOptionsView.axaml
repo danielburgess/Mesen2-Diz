@@ -328,7 +328,7 @@
 			/>
 		</c:OptionSection>
 	<c:OptionSection Header="AI Companion">
-		<Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" HorizontalAlignment="Stretch">
+		<Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto" HorizontalAlignment="Stretch">
 			<TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" Text="API Key:" Margin="0,0,6,2" />
 			<TextBox Grid.Row="0" Grid.Column="1"
 				Text="{Binding AiConfig.ApiKey}"
@@ -357,12 +357,20 @@
 				FormatString="0"
 				FontSize="11" Padding="3,2" Margin="0,2,0,0" />
 
-			<TextBlock Grid.Row="4" Grid.Column="0" VerticalAlignment="Center" Text="Monitoring:" Margin="0,2,6,2" />
-			<c:EnumComboBox Grid.Row="4" Grid.Column="1"
+			<TextBlock Grid.Row="4" Grid.Column="0" VerticalAlignment="Center" Text="Max Tool Calls:" Margin="0,2,6,2"
+				ToolTip.Tip="Maximum tool calls per response before Claude is forced to stop and summarise (0 = unlimited)" />
+			<NumericUpDown Grid.Row="4" Grid.Column="1"
+				Value="{Binding AiConfig.MaxToolCallsPerTurn}"
+				Minimum="0" Maximum="200" Increment="5"
+				FormatString="0"
+				FontSize="11" Padding="3,2" Margin="0,2,0,0" />
+
+			<TextBlock Grid.Row="5" Grid.Column="0" VerticalAlignment="Center" Text="Monitoring:" Margin="0,2,6,2" />
+			<c:EnumComboBox Grid.Row="5" Grid.Column="1"
 				SelectedItem="{Binding AiConfig.MonitoringMode}"
 				Margin="0,2,0,0" />
 
-			<CheckBox Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2"
+			<CheckBox Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2"
 				IsChecked="{Binding AiConfig.ShowToolCalls}"
 				Content="Show tool calls in chat"
 				Margin="0,4,0,0" />

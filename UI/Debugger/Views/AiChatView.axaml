@@ -47,8 +47,15 @@
 			BorderThickness="0,1,0,0"
 			BorderBrush="{StaticResource MesenBorderColor}"
 			Padding="4,2">
-			<TextBlock Text="{Binding StatusText}" FontSize="11"
-				Foreground="{StaticResource MesenTextMutedColor}" />
+			<Grid ColumnDefinitions="*,Auto">
+				<TextBlock Grid.Column="0" Text="{Binding StatusText}" FontSize="11"
+					VerticalAlignment="Center"
+					Foreground="{StaticResource MesenTextMutedColor}" />
+				<CheckBox Grid.Column="1" Content="Lock" FontSize="11"
+					IsChecked="{Binding ChatScrollLocked}"
+					ToolTip.Tip="Auto-scroll chat to the latest message"
+					VerticalAlignment="Center" Margin="4,0,0,0" />
+			</Grid>
 		</Border>
 
 		<!-- Input row -->
@@ -56,15 +63,21 @@
 			BorderThickness="0,1,0,0"
 			BorderBrush="{StaticResource MesenBorderColor}"
 			Padding="4">
-			<Grid ColumnDefinitions="*,Auto">
+			<Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto">
 				<TextBox Grid.Column="0"
 					x:Name="txtInput"
 					Text="{Binding InputText}"
-					Watermark="Ask Claude about the code..."
-					AcceptsReturn="False"
+					Watermark="Ask Claude... (Enter to send, Shift+Enter for newline)"
+					AcceptsReturn="True"
+					TextWrapping="Wrap"
+					MinHeight="28"
+					MaxHeight="100"
+					ScrollViewer.VerticalScrollBarVisibility="Auto"
 					FontSize="12"
+					VerticalContentAlignment="Center"
 					KeyDown="OnInputKeyDown" />
 				<Button Grid.Column="1" Margin="4,0,0,0" Padding="10,4"
+					VerticalAlignment="Bottom"
 					Click="OnSendCancelClick">
 					<Panel>
 						<TextBlock Text="Send"
@@ -77,7 +90,8 @@
 		</Border>
 
 		<!-- Message list -->
-		<ScrollViewer x:Name="chatScroll" HorizontalScrollBarVisibility="Disabled">
+		<ScrollViewer x:Name="chatScroll" HorizontalScrollBarVisibility="Disabled"
+			ScrollChanged="OnChatScrollChanged">
 			<ItemsControl ItemsSource="{Binding Messages}" Margin="4">
 				<ItemsControl.ItemTemplate>
 					<DataTemplate x:DataType="vm:ChatEntry">
@@ -88,7 +102,7 @@
 								Background="{StaticResource MesenBlueColor}"
 								CornerRadius="6" Padding="8,5"
 								HorizontalAlignment="Right" MaxWidth="480">
-								<TextBlock Text="{Binding Text}"
+								<SelectableTextBlock Text="{Binding Text}"
 									Foreground="White"
 									TextWrapping="Wrap" FontSize="12" />
 							</Border>
@@ -99,7 +113,7 @@
 								CornerRadius="6" Padding="8,5"
 								HorizontalAlignment="Left" MaxWidth="560">
 								<StackPanel>
-									<TextBlock Text="{Binding Text}"
+									<SelectableTextBlock Text="{Binding Text}"
 										TextWrapping="Wrap"
 										FontFamily="Courier New,Monospace" FontSize="12" />
 									<TextBlock IsVisible="{Binding IsStreaming}"
@@ -110,7 +124,7 @@
 							<!-- Tool status: centered, muted italic -->
 							<Border IsVisible="{Binding IsToolStatus}"
 								Padding="4,1" HorizontalAlignment="Center">
-								<TextBlock Text="{Binding Text}"
+								<SelectableTextBlock Text="{Binding Text}"
 									FontSize="11"
 									Foreground="{StaticResource MesenTextMutedColor}"
 									FontStyle="Italic" />
@@ -119,7 +133,7 @@
 							<!-- System message: centered, muted -->
 							<Border IsVisible="{Binding IsSystem}"
 								Padding="4,1" HorizontalAlignment="Center">
-								<TextBlock Text="{Binding Text}"
+								<SelectableTextBlock Text="{Binding Text}"
 									FontSize="11"
 									Foreground="{StaticResource MesenTextMutedColor}"
 									TextWrapping="Wrap" />
@@ -130,7 +144,7 @@
 								Background="{StaticResource MesenErrorColor}"
 								CornerRadius="4" Padding="8,5"
 								HorizontalAlignment="Stretch">
-								<TextBlock Text="{Binding Text}"
+								<SelectableTextBlock Text="{Binding Text}"
 									Foreground="White"
 									TextWrapping="Wrap" FontSize="12" />
 							</Border>

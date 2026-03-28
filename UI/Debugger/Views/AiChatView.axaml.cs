@@ -1,7 +1,7 @@
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Markup.Xaml;
-using Avalonia.Threading;
 using Mesen.Debugger.ViewModels;
 using Mesen.Utilities;
 using System;
@@ -11,6 +11,7 @@ namespace Mesen.Debugger.Views
 	public class AiChatView : UserControl
 	{
 		private AiCompanionViewModel? _model;
+		private bool _suppressScrollLockUpdate = false;
 
 		public AiChatView()
 		{
@@ -27,11 +28,26 @@ namespace Mesen.Debugger.Views
 			base.OnDataContextChanged(e);
 			if(DataContext is AiCompanionViewModel model) {
 				_model = model;
-				model.Messages.CollectionChanged += (_, _) => {
-					Dispatcher.UIThread.Post(() => {
-						this.FindControl<ScrollViewer>("chatScroll")?.ScrollToEnd();
-					}, DispatcherPriority.Background);
-				};
+				// No longer auto-scroll here — OnChatScrollChanged handles it
+			}
+		}
+
+		private void OnChatScrollChanged(object? sender, ScrollChangedEventArgs e)
+		{
+			if(_suppressScrollLockUpdate) return;
+			var scroll = (ScrollViewer)sender!;
+
+			if(e.ExtentDelta.Y > 0) {
+				// Content grew — auto-scroll if locked
+				if(_model?.ChatScrollLocked == true) {
+					_suppressScrollLockUpdate = true;
+					scroll.ScrollToEnd();
+					_suppressScrollLockUpdate = false;
+				}
+			} else if(e.OffsetDelta.Y != 0 && _model != null) {
+				// User manually scrolled — update lock based on whether at bottom
+				bool atBottom = scroll.Offset.Y + scroll.Viewport.Height >= scroll.Extent.Height - 8;
+				_model.ChatScrollLocked = atBottom;
 			}
 		}
 
@@ -42,6 +58,7 @@ namespace Mesen.Debugger.Views
 				if(!_model.IsBusy)
 					_model.SendCommand.Execute().Subscribe();
 			}
+			// Shift+Enter falls through to TextBox default (inserts newline, AcceptsReturn=True)
 		}
 
 		private void OnSendCancelClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
