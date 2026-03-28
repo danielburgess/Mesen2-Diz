@@ -141,7 +141,7 @@ namespace Mesen.Debugger.AI
 		Tool("reset_game",
 			"Reset the currently loaded game.",
 			Schema("", new() {
-				["type"] = Prop("string", ""soft" = SNES reset button (default); "hard" = power cycle (full restart)")
+				["type"] = Prop("string", "'soft' = SNES reset button (default); 'hard' = power cycle (full restart)")
 			}, Array.Empty<string>())),
 
 		// ── Breakpoints ────────────────────────────────────────────────────
@@ -154,16 +154,16 @@ namespace Mesen.Debugger.AI
 			"Add a breakpoint. Emulation pauses when the condition is met.",
 			Schema("", new() {
 				["address"]     = Prop("string",  "SNES CPU address as hex string ($BBAAAA)"),
-				["break_on"]    = Prop("string",  ""exec" (default), "read", "write", "read_write", or "all""),
-				["memory_type"] = Prop("string",  ""cpu" (default, CPU bus), "work_ram", "save_ram", "vram", "oam", "cgram""),
-				["condition"]   = Prop("string",  "Optional condition expression (e.g. "A == $10")")
+				["break_on"]    = Prop("string",  "exec (default), read, write, read_write, or all"),
+				["memory_type"] = Prop("string",  "cpu (default = CPU bus), work_ram, save_ram, vram, oam, cgram"),
+				["condition"]   = Prop("string",  "Optional condition expression, e.g. A == $10")
 			}, new[] { "address" })),
 
 		Tool("remove_breakpoint",
 			"Remove all breakpoints at the given address.",
 			Schema("", new() {
 				["address"]     = Prop("string", "SNES CPU address as hex string"),
-				["memory_type"] = Prop("string", "Memory space (default: "cpu")")
+				["memory_type"] = Prop("string", "Memory space (default: cpu)")
 			}, new[] { "address" })),
 
 		// ── Memory write ───────────────────────────────────────────────────
@@ -172,8 +172,8 @@ namespace Mesen.Debugger.AI
 			"Write bytes to emulated memory. Takes effect immediately, even while running.",
 			Schema("", new() {
 				["address"]     = Prop("string", "Start address as hex string"),
-				["data"]        = Prop("string", "Bytes as space-separated hex pairs, e.g. "A9 00 85 7E""),
-				["memory_type"] = Prop("string", ""cpu" (default), "work_ram", "save_ram", "vram", "oam", "cgram", "prg_rom"")
+				["data"]        = Prop("string", "Bytes as space-separated hex pairs, e.g. A9 00 85 7E"),
+				["memory_type"] = Prop("string", "cpu (default), work_ram, save_ram, vram, oam, cgram, prg_rom")
 			}, new[] { "address", "data" })),
 
 		// ── CPU state ──────────────────────────────────────────────────────
