@@ -54,6 +54,12 @@ namespace Mesen.Debugger.AI
 			while(true) {
 				ct.ThrowIfCancellationRequested();
 
+				// Remove any trailing assistant message whose tool_use blocks have no matching
+				// tool_result in the next message. This can be left behind if a previous turn
+				// was cancelled or threw after the assistant message was appended but before
+				// the tool results were added.
+				StripOrphanedToolUse(messages);
+
 				var (textParts, toolUses, stopReason) = await StreamOneRequest(
 					apiKey, model, maxTokens, systemPrompt, TrimHistory(messages, maxHistoryTurns), tools, onTextDelta, ct);
 
@@ -273,6 +279,58 @@ namespace Mesen.Debugger.AI
 		}
 
 		/// <summary>
+		/// Removes trailing assistant messages that contain tool_use blocks without a matching
+		/// user message of tool_results immediately following. Such entries are left behind when
+		/// a turn is cancelled or throws after the assistant message is appended but before the
+		/// tool results are added, and they cause a 400 on the next API call.
+		/// Mutates <paramref name="messages"/> in place.
+		/// </summary>
+		private static void StripOrphanedToolUse(List<JsonObject> messages)
+		{
+			for(int i = messages.Count - 1; i >= 0; i--) {
+				var msg = messages[i];
+				if(msg["role"]?.GetValue<string>() != "assistant") break;
+
+				var content = msg["content"] as JsonArray;
+				if(content == null) break;
+
+				// Collect all tool_use ids in this assistant message
+				var toolUseIds = new HashSet<string>();
+				foreach(var block in content) {
+					if(block is JsonObject b &&
+					   b["type"]?.GetValue<string>() == "tool_use" &&
+					   b["id"]?.GetValue<string>() is string id)
+						toolUseIds.Add(id);
+				}
+
+				if(toolUseIds.Count == 0) break; // no tool_use — history is valid up to here
+
+				// Check the immediately following message for matching tool_results
+				bool isMatched = false;
+				if(i + 1 < messages.Count) {
+					var next = messages[i + 1];
+					if(next["role"]?.GetValue<string>() == "user" &&
+					   next["content"] is JsonArray nextContent) {
+						var resultIds = new HashSet<string>();
+						foreach(var block in nextContent) {
+							if(block is JsonObject b &&
+							   b["type"]?.GetValue<string>() == "tool_result" &&
+							   b["tool_use_id"]?.GetValue<string>() is string rid)
+								resultIds.Add(rid);
+						}
+						isMatched = toolUseIds.IsSubsetOf(resultIds);
+					}
+				}
+
+				if(isMatched) break; // properly paired — history is valid
+
+				// Orphaned tool_use: remove this assistant message and everything after it
+				messages.RemoveRange(i, messages.Count - i);
+				break;
+			}
+		}
+
+				/// <summary>
 		/// Returns recent history trimmed to at most <paramref name="maxTurns"/> real user turns.
 		/// Trims only at turn-start boundaries (regular user messages, not tool_result messages)
 		/// so that tool_use/tool_result pairs are never split across the trim point.
