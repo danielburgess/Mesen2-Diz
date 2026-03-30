@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -12,9 +11,9 @@ using System.Threading.Tasks;
 namespace Mesen.Debugger.AI
 {
 	/// <summary>
-	/// Lightweight Claude API client with streaming and agentic tool-call loop.
+	/// Lightweight Claude (Anthropic) API client with streaming and agentic tool-call loop.
 	/// </summary>
-	public class ClaudeClient : IDisposable
+	public class ClaudeClient : IAiClient
 	{
 		private static readonly HttpClient _http = new HttpClient();
 		private const string ApiUrl = "https://api.anthropic.com/v1/messages";
@@ -58,10 +57,10 @@ namespace Mesen.Debugger.AI
 				// tool_result in the next message. This can be left behind if a previous turn
 				// was cancelled or threw after the assistant message was appended but before
 				// the tool results were added.
-				StripOrphanedToolUse(messages);
+				AiMessageHelpers.StripOrphanedToolUse(messages);
 
 				var (textParts, toolUses, stopReason) = await StreamOneRequest(
-					apiKey, model, maxTokens, systemPrompt, TrimHistory(messages, maxHistoryTurns), tools, onTextDelta, ct);
+					apiKey, model, maxTokens, systemPrompt, AiMessageHelpers.TrimHistory(messages, maxHistoryTurns), tools, onTextDelta, ct);
 
 				// Build the assistant message from what we accumulated
 				var assistantContent = new JsonArray();
@@ -122,7 +121,7 @@ namespace Mesen.Debugger.AI
 						}
 					});
 					var (summaryParts, _, _) = await StreamOneRequest(
-						apiKey, model, maxTokens, systemPrompt, TrimHistory(messages, maxHistoryTurns), new List<JsonObject>(), onTextDelta, ct);
+						apiKey, model, maxTokens, systemPrompt, AiMessageHelpers.TrimHistory(messages, maxHistoryTurns), new List<JsonObject>(), onTextDelta, ct);
 					// Record the summary so the next turn doesn't see an orphaned user message
 					if(summaryParts.Count > 0) {
 						messages.Add(new JsonObject {
@@ -165,8 +164,8 @@ namespace Mesen.Debugger.AI
 				["max_tokens"] = maxTokens,
 				["system"] = systemBlock,
 				["stream"] = true,
-				["messages"] = CloneArray(messages),
-				["tools"] = CloneArray(tools)
+				["messages"] = AiMessageHelpers.CloneArray(messages),
+				["tools"] = AiMessageHelpers.CloneArray(tools)
 			};
 
 			string bodyJson = body.ToJsonString();
@@ -283,102 +282,6 @@ namespace Mesen.Debugger.AI
 			} // end using(response)
 		}
 
-		/// <summary>
-		/// Removes trailing assistant messages that contain tool_use blocks without a matching
-		/// user message of tool_results immediately following. Such entries are left behind when
-		/// a turn is cancelled or throws after the assistant message is appended but before the
-		/// tool results are added, and they cause a 400 on the next API call.
-		/// Mutates <paramref name="messages"/> in place.
-		/// </summary>
-		private static void StripOrphanedToolUse(List<JsonObject> messages)
-		{
-			// Scan forward. For each assistant message that contains tool_use blocks, verify
-			// that the immediately following message is a user message with matching tool_result
-			// entries. If not, remove just that assistant message in place (leave anything after
-			// it — in particular the most-recently added real user message — untouched).
-			for(int i = 0; i < messages.Count; i++) {
-				var msg = messages[i];
-				if(msg["role"]?.GetValue<string>() != "assistant") continue;
-
-				var content = msg["content"] as JsonArray;
-				if(content == null) continue;
-
-				var toolUseIds = new HashSet<string>();
-				foreach(var block in content) {
-					if(block is JsonObject b &&
-					   b["type"]?.GetValue<string>() == "tool_use" &&
-					   b["id"]?.GetValue<string>() is string id)
-						toolUseIds.Add(id);
-				}
-
-				if(toolUseIds.Count == 0) continue; // no tool_use — move on
-
-				// Check whether the next message holds all the matching tool_results
-				bool matched = false;
-				if(i + 1 < messages.Count) {
-					var next = messages[i + 1];
-					if(next["role"]?.GetValue<string>() == "user" &&
-					   next["content"] is JsonArray nextContent) {
-						matched = true;
-						foreach(string tuId in toolUseIds) {
-							bool found = false;
-							foreach(var block in nextContent) {
-								if(block is JsonObject b &&
-								   b["type"]?.GetValue<string>() == "tool_result" &&
-								   b["tool_use_id"]?.GetValue<string>() == tuId) {
-									found = true;
-									break;
-								}
-							}
-							if(!found) { matched = false; break; }
-						}
-					}
-				}
-
-				if(matched) continue;
-
-				// Orphaned: remove only this assistant message; messages after it stay.
-				messages.RemoveAt(i);
-				i--; // recheck this index after the shift
-			}
-		}
-
-				/// <summary>
-		/// Returns recent history trimmed to at most <paramref name="maxTurns"/> real user turns.
-		/// Trims only at turn-start boundaries (regular user messages, not tool_result messages)
-		/// so that tool_use/tool_result pairs are never split across the trim point.
-		/// </summary>
-		private static List<JsonObject> TrimHistory(List<JsonObject> messages, int maxTurns)
-		{
-			if(maxTurns <= 0)
-				return messages;
-
-			// Collect indices of "real" user turn starts — user messages that are NOT tool_results
-			var turnStarts = new List<int>();
-			for(int i = 0; i < messages.Count; i++) {
-				var msg = messages[i];
-				if(msg["role"]?.GetValue<string>() == "user") {
-					bool isToolResult = msg["content"] is JsonArray arr && arr.Count > 0 &&
-						(arr[0] as JsonObject)?["type"]?.GetValue<string>() == "tool_result";
-					if(!isToolResult)
-						turnStarts.Add(i);
-				}
-			}
-
-			if(turnStarts.Count <= maxTurns)
-				return messages;
-
-			int startIdx = turnStarts[turnStarts.Count - maxTurns];
-			return messages.GetRange(startIdx, messages.Count - startIdx);
-		}
-
-		private static JsonArray CloneArray(List<JsonObject> items)
-		{
-			var arr = new JsonArray();
-			foreach(var item in items)
-				arr.Add(item.DeepClone());
-			return arr;
-		}
 	}
 
 	internal class ToolUseAccum

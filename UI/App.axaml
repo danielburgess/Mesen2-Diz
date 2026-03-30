@@ -35,7 +35,7 @@
 
 		<!-- AI chat bubble colors -->
 		<SolidColorBrush x:Key="MesenBlueColor">#1565C0</SolidColorBrush>
-		<SolidColorBrush x:Key="MesenGreenColor">#1B6B1B</SolidColorBrush>
+		<SolidColorBrush x:Key="MesenGreenColor">#2A852A</SolidColorBrush>
 		<SolidColorBrush x:Key="MesenErrorColor">#B71C1C</SolidColorBrush>
 		<SolidColorBrush x:Key="MesenBorderColor">#505050</SolidColorBrush>
 		<SolidColorBrush x:Key="MesenTextMutedColor">#909090</SolidColorBrush>

@@ -20,6 +20,8 @@ namespace Mesen.Debugger.ViewModels
 		public DebuggerConfig Debugger { get; set; }
 		public ScriptWindowConfig Script { get; set; }
 		public IntegrationConfig Integration { get; set; }
+		public AiCompanionConfig AiConfig { get; set; }
+		[Reactive] public bool IsLocalAiProvider { get; private set; }
 
 		public List<object> CpuTypeList { get; set; } = new();
 
@@ -48,12 +50,16 @@ namespace Mesen.Debugger.ViewModels
 			Fonts = ConfigManager.Config.Debug.Fonts;
 			Script = ConfigManager.Config.Debug.ScriptWindow;
 			Integration = ConfigManager.Config.Debug.Integration;
+			AiConfig = ConfigManager.Config.Debug.AiCompanion;
 
 			_backupDebugger = Debugger.Clone();
 			_backupFont = Fonts.Clone();
 			_backupScript = Script.Clone();
 			_backupIntegration = Integration.Clone();
 			_backupShortcuts = ConfigManager.Config.Debug.Shortcuts.Clone();
+
+			IsLocalAiProvider = AiConfig.Provider == AiProvider.OpenAiCompatible;
+			AddDisposable(AiConfig.WhenAnyValue(x => x.Provider).Subscribe(p => IsLocalAiProvider = p == AiProvider.OpenAiCompatible));
 
 			InitShortcutLists();
 
@@ -330,7 +336,8 @@ namespace Mesen.Debugger.ViewModels
 		//separator
 		FontAndColors = 3,
 		Integration = 4,
+		AiCompanion = 5,
 		//separator
-		Shortcuts = 6
+		Shortcuts = 7
 	}
 }

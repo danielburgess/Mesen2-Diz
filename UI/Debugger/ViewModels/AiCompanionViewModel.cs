@@ -61,7 +61,9 @@ namespace Mesen.Debugger.ViewModels
 
 		// ── Infrastructure ────────────────────────────────────────────────────
 
-		private readonly ClaudeClient _client = new();
+		[Reactive] public bool IsLocalProvider { get; private set; }
+		[Reactive] public string ProviderModelDisplay { get; private set; } = "";
+
 		private readonly AiTools _tools;
 		private readonly ExecutionMonitor _monitor;
 		private readonly List<JsonObject> _history = new();
@@ -92,6 +94,14 @@ namespace Mesen.Debugger.ViewModels
 			ClearCommand = ReactiveCommand.Create(ClearChat);
 			ClearContextCommand = ReactiveCommand.Create(ClearContextFile);
 			AnalyzeQueueItemCommand = ReactiveCommand.CreateFromTask<ReviewQueueItem>(AnalyzeQueueItemAsync, canSend);
+
+			// Mirror provider flag and update display text when provider or model changes
+			AddDisposable(Config.WhenAnyValue(x => x.Provider, x => x.Model, (p, m) => (p, m))
+				.Subscribe(t => {
+					IsLocalProvider = t.p == AiProvider.OpenAiCompatible;
+					string providerLabel = t.p == AiProvider.OpenAiCompatible ? "Local" : "Claude";
+					ProviderModelDisplay = $"{providerLabel} · {t.m}";
+				}));
 
 			// Mirror MonitoringMode config to the ExecutionMonitor
 			AddDisposable(Config.WhenAnyValue(x => x.MonitoringMode).Subscribe(mode => {
@@ -201,6 +211,7 @@ namespace Mesen.Debugger.ViewModels
 
 				var messagesArray = new JsonArray();
 				foreach(var entry in Messages) {
+					if(entry.Kind == ChatEntry.EntryKind.System) continue;
 					messagesArray.Add((JsonNode)new JsonObject {
 						["kind"] = (int)entry.Kind,
 						["text"] = entry.Text,
@@ -289,8 +300,9 @@ namespace Mesen.Debugger.ViewModels
 
 		private async Task RunTurnAsync(string userMessage)
 		{
-			if(string.IsNullOrEmpty(Config.ApiKey)) {
-				Dispatcher.UIThread.Post(() => AddEntry(ChatEntry.EntryKind.Error, "API key not set. Enter your Anthropic API key in the Settings panel (gear icon)."));
+			bool isLocal = Config.Provider == AiProvider.OpenAiCompatible;
+			if(!isLocal && string.IsNullOrEmpty(Config.ApiKey)) {
+				Dispatcher.UIThread.Post(() => AddEntry(ChatEntry.EntryKind.Error, "API key not set. Enter your Anthropic API key in the Settings panel."));
 				return;
 			}
 
@@ -298,7 +310,7 @@ namespace Mesen.Debugger.ViewModels
 			_cts = cts;
 
 			// Capture config values on calling thread before any await
-			string apiKey = Config.ApiKey;
+			string apiKey = isLocal ? Config.LocalApiKey : Config.ApiKey;
 			string model = Config.Model;
 			int maxTokens = Config.MaxTokens;
 			int maxHistoryTurns = Config.MaxHistoryTurns;
@@ -314,15 +326,20 @@ namespace Mesen.Debugger.ViewModels
 
 			// All UI mutations on UI thread
 			ChatEntry assistantEntry = new ChatEntry { Kind = ChatEntry.EntryKind.Assistant, IsStreaming = true };
+			string providerName = isLocal ? "Local AI" : "Claude";
 			await Dispatcher.UIThread.InvokeAsync(() => {
 				IsBusy = true;
-				StatusText = "Claude is thinking...";
+				StatusText = $"{providerName} is thinking...";
 				AddEntry(ChatEntry.EntryKind.User, userMessage);
 				Messages.Add(assistantEntry);
 			});
 
+			IAiClient client = isLocal
+				? new OpenAiCompatibleClient(Config.LocalApiEndpoint)
+				: new ClaudeClient();
+
 			try {
-				await _client.RunTurnAsync(
+				await client.RunTurnAsync(
 					apiKey: apiKey,
 					model: model,
 					maxTokens: maxTokens,
@@ -557,7 +574,6 @@ Always read code before labeling it. Correct wrong labels when you find them."
 			_monitor.OnNewItem -= OnMonitorNewItem;
 			_monitor.OnBreakpointHit -= OnBreakpointHit;
 			_monitor.Dispose();
-			_client.Dispose();
 		}
 	}
 }

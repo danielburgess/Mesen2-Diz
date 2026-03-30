@@ -122,9 +122,10 @@ public static class SnesAsmExporter
             else if (ann.Type == ByteType.Unreached || ann.Type == ByteType.Operand)
             {
                 // Emit every byte including unreached and stray operand bytes.
-                // Matches DiztinGUIsh behaviour: no bytes are silently skipped.
-                sb.AppendLine($"        db ${romBytes[i]:X2}");
-                size = 1;
+                // Group consecutive bytes of the same kind onto one db line.
+                size = EmitDbGroup(sb, store, romBytes, i, inlineComment,
+                                   commentsByOffset, labelCommentsByOffset,
+                                   allLabelsByOffset, romLen, map);
             }
             else
                 size = EmitDataGroup(sb, store, romBytes, i, ann.Type, inlineComment,
@@ -258,6 +259,60 @@ public static class SnesAsmExporter
             FlushDataLine(sb, dir, elems, pendingComment);
 
         // Guarantee forward progress even if nothing was emitted.
+        return Math.Max(i - startRom, 1);
+    }
+
+    private static int EmitDbGroup(
+        StringBuilder sb,
+        RomAnnotationStore store,
+        byte[] romBytes,
+        int startRom,
+        string? firstComment,
+        Dictionary<int, string> commentsByOffset,
+        Dictionary<int, string> labelCommentsByOffset,
+        Dictionary<int, string> labelsByOffset,
+        int romLen,
+        RomMapMode map)
+    {
+        int i = startRom;
+        var elems = new List<string>(DataLineMaxBytes + 1);
+        string? pendingComment = firstComment;
+        int prevSnes = -1;
+
+        while (i < romLen)
+        {
+            var t = store.Bytes[i].Type;
+            if (t != ByteType.Unreached && t != ByteType.Operand) break;
+
+            if (!SnesAddressConverter.TryToSnesAddress(i, romLen, map, out int snes)) break;
+
+            // Break on SNES address gap (e.g. bank boundary).
+            if (prevSnes >= 0 && snes != prevSnes + 1) break;
+
+            // A label, label-comment, or inline comment at a non-first byte
+            // ends the group so annotations can be re-emitted on the new line.
+            if (i != startRom)
+            {
+                if (labelsByOffset.ContainsKey(i))        break;
+                if (commentsByOffset.ContainsKey(i))      break;
+                if (labelCommentsByOffset.ContainsKey(i)) break;
+            }
+
+            elems.Add($"${romBytes[i]:X2}");
+            prevSnes = snes;
+            i++;
+
+            if (elems.Count >= DataLineMaxBytes)
+            {
+                FlushDataLine(sb, "db", elems, pendingComment);
+                elems.Clear();
+                pendingComment = null;
+            }
+        }
+
+        if (elems.Count > 0)
+            FlushDataLine(sb, "db", elems, pendingComment);
+
         return Math.Max(i - startRom, 1);
     }
 

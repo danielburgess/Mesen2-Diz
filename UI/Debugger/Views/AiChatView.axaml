@@ -6,35 +6,55 @@
 	xmlns:vm="using:Mesen.Debugger.ViewModels"
 	xmlns:c="using:Mesen.Controls"
 	xmlns:cfg="using:Mesen.Config"
+	xmlns:md="clr-namespace:Markdown.Avalonia;assembly=Markdown.Avalonia"
 	mc:Ignorable="d" d:DesignWidth="300" d:DesignHeight="400"
 	x:DataType="vm:AiCompanionViewModel"
 	x:Class="Mesen.Debugger.Views.AiChatView"
 >
 	<DockPanel>
 
-		<!-- Header bar: monitor + context status + model label + clear -->
+		<!-- Header bar -->
 		<Border DockPanel.Dock="Top"
 			BorderThickness="0,0,0,1"
 			BorderBrush="{StaticResource MesenBorderColor}"
 			Padding="4,3">
-			<Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+			<Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto">
+
+				<!-- Monitor mode -->
 				<TextBlock Grid.Column="0" Text="Monitor:" FontSize="11"
 					VerticalAlignment="Center" Margin="0,0,4,0" />
 				<c:EnumComboBox Grid.Column="1"
 					SelectedItem="{Binding Config.MonitoringMode}"
 					FontSize="11" />
-				<TextBlock Grid.Column="2" Margin="6,0,0,0" FontSize="11"
+
+				<!-- Context file -->
+				<TextBlock Grid.Column="2" Margin="8,0,2,0" FontSize="11"
 					VerticalAlignment="Center"
 					Text="{Binding ContextStatusText}"
 					Foreground="{StaticResource MesenTextMutedColor}"
 					FontStyle="Italic"
-					ToolTip.Tip="Context file status — load or clear in Settings" />
-				<TextBlock Grid.Column="3" Margin="6,0,0,0" FontSize="11"
+					ToolTip.Tip="Context file loaded into every prompt" />
+				<Button Grid.Column="3" Padding="4,1" FontSize="11"
+					Click="OnLoadContextClick"
+					ToolTip.Tip="Load a context file (.txt / .md)">
+					<TextBlock Text="ctx…" FontSize="11" />
+				</Button>
+				<Button Grid.Column="4" Padding="4,1" FontSize="11"
+					Command="{Binding ClearContextCommand}"
+					IsVisible="{Binding Config.ContextFilePath, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+					ToolTip.Tip="Clear context file">
+					<TextBlock Text="✕" FontSize="11" />
+				</Button>
+
+				<!-- Provider + model (read-only; configure in Debugger Settings) -->
+				<TextBlock Grid.Column="5" Margin="8,0,0,0" FontSize="11"
 					VerticalAlignment="Center"
-					Text="{Binding Config.Model}"
+					Text="{Binding ProviderModelDisplay}"
 					Foreground="{StaticResource MesenTextMutedColor}"
-					ToolTip.Tip="Active model — change in Settings" />
-				<Button Grid.Column="4" Margin="4,0,0,0" Padding="6,2"
+					ToolTip.Tip="Active provider and model — configure in Debugger Settings → AI Companion" />
+
+				<!-- Clear chat -->
+				<Button Grid.Column="6" Margin="4,0,0,0" Padding="6,2"
 					Command="{Binding ClearCommand}"
 					ToolTip.Tip="Clear chat history">
 					<TextBlock Text="Clear" FontSize="11" />
@@ -113,11 +133,19 @@
 								CornerRadius="6" Padding="8,5"
 								HorizontalAlignment="Left" MaxWidth="560">
 								<StackPanel>
-									<SelectableTextBlock Text="{Binding Text}"
-										Foreground="White"
+									<!-- Streaming: plain text with cursor -->
+									<SelectableTextBlock IsVisible="{Binding IsStreaming}"
+										Text="{Binding Text}"
 										TextWrapping="Wrap" FontSize="12" />
 									<TextBlock IsVisible="{Binding IsStreaming}"
-										Text="▌" FontSize="12" Foreground="White" Opacity="0.5" />
+										Text="▌" FontSize="12" Opacity="0.5" />
+
+									<!-- Completed: rendered markdown -->
+									<md:MarkdownScrollViewer
+										IsVisible="{Binding IsStreaming, Converter={x:Static BoolConverters.Not}}"
+										Markdown="{Binding Text}"
+										MarkdownStyleName="GithubLike"
+										HorizontalAlignment="Stretch" />
 								</StackPanel>
 							</Border>
 

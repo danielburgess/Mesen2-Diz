@@ -270,6 +270,97 @@
 				</StackPanel>
 			</TabItem>
 
+			<TabItem>
+				<TabItem.Header>
+					<StackPanel Orientation="Horizontal">
+						<Image Source="/Assets/Chip.png" Margin="0 0 10 0" />
+						<TextBlock VerticalAlignment="Center" Text="AI Companion" />
+					</StackPanel>
+				</TabItem.Header>
+
+				<ScrollViewer>
+					<StackPanel Margin="5">
+						<c:OptionSection Header="Provider" Margin="0">
+							<Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto">
+								<TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" Text="Provider:" Margin="0,0,6,2" />
+								<c:EnumComboBox Grid.Row="0" Grid.Column="1"
+									SelectedItem="{Binding AiConfig.Provider}"
+									FontSize="11" Padding="3,2"
+									ToolTip.Tip="Claude (Anthropic) or any OpenAI-compatible local server" />
+
+								<TextBlock Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Text="API Key:" Margin="0,4,6,0"
+									IsVisible="{Binding IsLocalAiProvider, Converter={x:Static BoolConverters.Not}}" />
+								<TextBox Grid.Row="1" Grid.Column="1"
+									IsVisible="{Binding IsLocalAiProvider, Converter={x:Static BoolConverters.Not}}"
+									Text="{Binding AiConfig.ApiKey}"
+									PasswordChar="•" FontSize="11" Padding="3,2" Margin="0,4,0,0"
+									ToolTip.Tip="Your Anthropic API key" />
+
+								<TextBlock Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Text="Endpoint:" Margin="0,4,6,0"
+									IsVisible="{Binding IsLocalAiProvider}" />
+								<TextBox Grid.Row="1" Grid.Column="1"
+									IsVisible="{Binding IsLocalAiProvider}"
+									Text="{Binding AiConfig.LocalApiEndpoint}"
+									FontSize="11" Padding="3,2" Margin="0,4,0,0"
+									ToolTip.Tip="Base URL of your OpenAI-compatible server (e.g. http://localhost:11434/v1)" />
+
+								<TextBlock Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Text="Local Key:" Margin="0,4,6,0"
+									IsVisible="{Binding IsLocalAiProvider}" />
+								<TextBox Grid.Row="2" Grid.Column="1"
+									IsVisible="{Binding IsLocalAiProvider}"
+									Text="{Binding AiConfig.LocalApiKey}"
+									PasswordChar="•" FontSize="11" Padding="3,2" Margin="0,4,0,0"
+									ToolTip.Tip="API key for the local server (leave empty if not required)" />
+							</Grid>
+						</c:OptionSection>
+
+						<c:OptionSection Header="Model">
+							<Panel>
+								<ComboBox IsVisible="{Binding IsLocalAiProvider, Converter={x:Static BoolConverters.Not}}"
+									ItemsSource="{x:Static cfg:AiModelLists.ClaudeModels}"
+									SelectedItem="{Binding AiConfig.Model}"
+									FontSize="11" HorizontalAlignment="Stretch"
+									ToolTip.Tip="Select Claude model" />
+								<TextBox IsVisible="{Binding IsLocalAiProvider}"
+									Text="{Binding AiConfig.Model}"
+									FontSize="11" Padding="3,2"
+									ToolTip.Tip="Local model name (e.g. llama3, mistral, qwen2.5-coder)" />
+							</Panel>
+						</c:OptionSection>
+
+						<c:OptionSection Header="Behavior">
+							<Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto">
+								<TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" Text="Max Tokens:" Margin="0,0,6,2" />
+								<NumericUpDown Grid.Row="0" Grid.Column="1"
+									Value="{Binding AiConfig.MaxTokens}"
+									Minimum="256" Maximum="32000" Increment="512"
+									FormatString="0" FontSize="11" Padding="3,2" />
+
+								<TextBlock Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Text="History Turns:" Margin="0,4,6,0" />
+								<NumericUpDown Grid.Row="1" Grid.Column="1"
+									Value="{Binding AiConfig.MaxHistoryTurns}"
+									Minimum="1" Maximum="100" Increment="1"
+									FormatString="0" FontSize="11" Padding="3,2" Margin="0,4,0,0" />
+
+								<TextBlock Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Text="Max Tool Calls:" Margin="0,4,6,0"
+									ToolTip.Tip="Maximum tool calls per response (0 = unlimited)" />
+								<NumericUpDown Grid.Row="2" Grid.Column="1"
+									Value="{Binding AiConfig.MaxToolCallsPerTurn}"
+									Minimum="0" Maximum="200" Increment="5"
+									FormatString="0" FontSize="11" Padding="3,2" Margin="0,4,0,0" />
+
+								<TextBlock Grid.Row="3" Grid.Column="0" VerticalAlignment="Center" Text="Monitoring:" Margin="0,4,6,0" />
+								<c:EnumComboBox Grid.Row="3" Grid.Column="1"
+									SelectedItem="{Binding AiConfig.MonitoringMode}"
+									Margin="0,4,0,0" />
+							</Grid>
+							<CheckBox IsChecked="{Binding AiConfig.ShowToolCalls}"
+								Content="Show tool calls in chat" Margin="0,6,0,0" />
+						</c:OptionSection>
+					</StackPanel>
+				</ScrollViewer>
+			</TabItem>
+
 			<TabItem IsEnabled="False" MinHeight="10">
 				<TabItem.Header>
 					<Rectangle Fill="{StaticResource MesenGrayBorderColor}" Height="1" />

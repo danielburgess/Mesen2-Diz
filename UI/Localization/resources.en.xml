@@ -3066,6 +3066,10 @@ E
 			<Value ID="Show">Show</Value>
 			<Value ID="Disassemble">Disassemble</Value>
 		</Enum>
+		<Enum ID="AiProvider">
+			<Value ID="Claude">Claude (Anthropic)</Value>
+			<Value ID="OpenAiCompatible">OpenAI-compatible (Ollama, LM Studio…)</Value>
+		</Enum>
 		<Enum ID="AiMonitoringMode">
 			<Value ID="Disabled">Disabled</Value>
 			<Value ID="Queue">Queue (collect for review)</Value>
