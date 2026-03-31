@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -36,6 +37,13 @@ namespace Mesen.Debugger.ViewModels
 		public void AppendText(string delta) => Text += delta;
 	}
 
+	public class ChatHistoryEntry
+	{
+		public DateTime Timestamp { get; init; }
+		public string FilePath { get; init; } = "";
+		public string DisplayText => Timestamp.ToString("yyyy-MM-dd  HH:mm:ss");
+	}
+
 	public class AiCompanionViewModel : DisposableViewModel
 	{
 		// ── Observables ───────────────────────────────────────────────────────
@@ -44,12 +52,17 @@ namespace Mesen.Debugger.ViewModels
 		[Reactive] public string InputText { get; set; } = "";
 		[Reactive] public string StatusText { get; private set; } = "Ready";
 		[Reactive] public string ContextStatusText { get; private set; } = "no context";
-		[Reactive] public bool ReviewQueueHasItems { get; private set; }
 		[Reactive] public bool ChatScrollLocked { get; set; } = true;
+
+		// History viewer state
+		[Reactive] public bool IsViewingHistory { get; private set; }
+		[Reactive] public string HistorySessionLabel { get; private set; } = "";
+		[Reactive] public bool HasArchivedSessions { get; private set; }
+		[Reactive] public ObservableCollection<ChatEntry> ActiveMessages { get; private set; } = null!;
 
 		public ObservableCollection<ChatEntry> Messages { get; } = new();
 		public ObservableCollection<ChatEntry> ToolCallLog { get; } = new();
-		public ObservableCollection<ReviewQueueItem> ReviewQueue { get; }
+		public ObservableCollection<ChatHistoryEntry> ArchivedSessions { get; } = new();
 
 		// ── Commands ──────────────────────────────────────────────────────────
 
@@ -57,7 +70,7 @@ namespace Mesen.Debugger.ViewModels
 		public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> CancelCommand { get; }
 		public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> ClearCommand { get; }
 		public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> ClearContextCommand { get; }
-		public ReactiveCommand<ReviewQueueItem, System.Reactive.Unit> AnalyzeQueueItemCommand { get; }
+		public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> BackToLiveCommand { get; }
 
 		// ── Infrastructure ────────────────────────────────────────────────────
 
@@ -66,8 +79,9 @@ namespace Mesen.Debugger.ViewModels
 		[Reactive] public string InputWatermark { get; private set; } = "Ask AI… (Enter to send, Shift+Enter for newline)";
 
 		private readonly AiTools _tools;
-		private readonly ExecutionMonitor _monitor;
 		private readonly List<JsonObject> _history = new();
+		private readonly Queue<string> _pendingBreakContext = new();
+		private readonly ObservableCollection<ChatEntry> _archivedSessionMessages = new();
 		private CancellationTokenSource? _cts;
 		private string _historyPath = "";
 		private string _contextText = "";  // loaded from context file
@@ -78,13 +92,15 @@ namespace Mesen.Debugger.ViewModels
 
 		public AiCompanionViewModel()
 		{
-			_monitor = new ExecutionMonitor();
-			_tools = new AiTools { Monitor = _monitor };
-			ReviewQueue = _monitor.Queue;
+			ActiveMessages = Messages;
 
-			_monitor.OnNewItem += OnMonitorNewItem;
-		_monitor.OnBreakpointHit += OnBreakpointHit;
-			ReviewQueue.CollectionChanged += (_, _) => ReviewQueueHasItems = ReviewQueue.Count > 0;
+			_tools = new AiTools();
+			_tools.OnToolLog = msg => Dispatcher.UIThread.Post(() => AddToolLog(msg));
+			_tools.GetAndClearPendingBreaks = () => {
+				var list = _pendingBreakContext.ToList();
+				_pendingBreakContext.Clear();
+				return list;
+			};
 
 			var canSend = this.WhenAnyValue(
 				x => x.IsBusy,
@@ -94,7 +110,9 @@ namespace Mesen.Debugger.ViewModels
 			CancelCommand = ReactiveCommand.Create(() => _cts?.Cancel());
 			ClearCommand = ReactiveCommand.Create(ClearChat);
 			ClearContextCommand = ReactiveCommand.Create(ClearContextFile);
-			AnalyzeQueueItemCommand = ReactiveCommand.CreateFromTask<ReviewQueueItem>(AnalyzeQueueItemAsync, canSend);
+			BackToLiveCommand = ReactiveCommand.Create(BackToLive);
+
+			ArchivedSessions.CollectionChanged += (_, _) => HasArchivedSessions = ArchivedSessions.Count > 0;
 
 			// Mirror provider flag and update display text when provider or model changes
 			AddDisposable(Config.WhenAnyValue(x => x.Provider, x => x.Model, (p, m) => (p, m))
@@ -102,23 +120,49 @@ namespace Mesen.Debugger.ViewModels
 					IsLocalProvider = t.p == AiProvider.OpenAiCompatible;
 					string providerLabel = t.p == AiProvider.OpenAiCompatible ? "Custom AI" : "Claude";
 					ProviderModelDisplay = $"{providerLabel} · {t.m}";
-					InputWatermark = $"Ask {providerLabel}… (Enter to send, Shift+Enter for newline)";
+					InputWatermark = "Ask AI… (Enter to send, Shift+Enter for newline)";
 				}));
-
-			// Mirror MonitoringMode config to the ExecutionMonitor
-			AddDisposable(Config.WhenAnyValue(x => x.MonitoringMode).Subscribe(mode => {
-				if(mode != AiMonitoringMode.Disabled) _monitor.Start();
-				else _monitor.Stop();
-			}));
 
 			LoadHistory();
 		}
 
 		// ── Public API ────────────────────────────────────────────────────────
 
+		/// <summary>
+		/// Called when the emulator hits a user-set breakpoint.
+		/// Skips pauses, steps, and any non-user-triggered break source.
+		/// If already busy, queues the context snapshot for the AI to read via get_pending_breakpoints.
+		/// </summary>
+		public void OnBreakpointHit(BreakEvent evt)
+		{
+			// Only react to real user-set breakpoints, not pause/step/NMI/etc.
+			if(evt.Source != BreakSource.Breakpoint) return;
+
+			uint addr = (uint)evt.Operation.Address;
+			string cpu = evt.SourceCpu.ToString();
+
+			// Capture CPU state + disassembly immediately, before any async work runs.
+			string context = _tools.BuildBreakContext(evt.SourceCpu);
+			string header  = $"Breakpoint #{evt.BreakpointId} hit: {cpu} at ${addr:X6}";
+			string full    = $"{header}\n{context}";
+
+			if(IsBusy) {
+				// Queue for the AI to retrieve via get_pending_breakpoints
+				_pendingBreakContext.Enqueue(full);
+				return;
+			}
+
+			string prompt = $"[{header}] The emulator has paused. " +
+			                $"Identify what code is running here and apply labels/comments if unannotated.\n\n" +
+			                context;
+
+			StatusText = $"Breakpoint hit at ${addr:X6} ({cpu})";
+			_ = RunTurnAsync(prompt);
+		}
+
 		public void OnGameLoaded()
 		{
-			_monitor.Reset();
+			BackToLive();
 			_tools.Reset();
 			_cts?.Cancel();
 
@@ -128,6 +172,7 @@ namespace Mesen.Debugger.ViewModels
 			_history.Clear();
 			Messages.Clear();
 			ToolCallLog.Clear();
+			_pendingBreakContext.Clear();
 
 			// Load history for newly loaded ROM
 			LoadHistory();
@@ -275,6 +320,7 @@ namespace Mesen.Debugger.ViewModels
 			} catch {
 				AddSystemMessage("AI Companion ready. (Could not load previous history.)");
 			}
+			LoadArchivedSessions();
 		}
 
 		// ── Private ───────────────────────────────────────────────────────────
@@ -286,18 +332,6 @@ namespace Mesen.Debugger.ViewModels
 			InputText = "";
 
 			await RunTurnAsync(text);
-		}
-
-		private async Task AnalyzeQueueItemAsync(ReviewQueueItem item)
-		{
-			item.IsAnalyzed = true;
-			string prompt = $"Please analyze the unannotated {item.FlagsDisplay} at ${item.CpuAddress:X6}. " +
-			                $"Examine the disassembly, check what calls this location, identify what it does, " +
-			                $"and apply appropriate label and comment annotations.";
-			if(!string.IsNullOrEmpty(item.Reason))
-				prompt += $"\n\nContext note: {item.Reason}";
-
-			await RunTurnAsync(prompt);
 		}
 
 		private async Task RunTurnAsync(string userMessage)
@@ -317,7 +351,6 @@ namespace Mesen.Debugger.ViewModels
 			int maxTokens = Config.MaxTokens;
 			int maxHistoryTurns = Config.MaxHistoryTurns;
 			int maxToolCallsPerTurn = Config.MaxToolCallsPerTurn;
-			bool showToolCalls = Config.ShowToolCalls;
 			string systemPrompt = BuildSystemPrompt();
 
 			// Add user message to history (API state — thread-safe list)
@@ -328,10 +361,9 @@ namespace Mesen.Debugger.ViewModels
 
 			// All UI mutations on UI thread
 			ChatEntry assistantEntry = new ChatEntry { Kind = ChatEntry.EntryKind.Assistant, IsStreaming = true };
-			string providerName = isLocal ? "Local AI" : "Claude";
 			await Dispatcher.UIThread.InvokeAsync(() => {
 				IsBusy = true;
-				StatusText = $"{providerName} is thinking...";
+				StatusText = "AI is thinking...";
 				AddEntry(ChatEntry.EntryKind.User, userMessage);
 				Messages.Add(assistantEntry);
 			});
@@ -339,6 +371,10 @@ namespace Mesen.Debugger.ViewModels
 			IAiClient client = isLocal
 				? new OpenAiCompatibleClient(Config.LocalApiEndpoint)
 				: new ClaudeClient();
+
+			// Proactively compact history before it hits the token limit.
+			// This summarizes dropped turns rather than silently discarding them.
+			await TryCompactHistoryAsync(client, apiKey, model, maxHistoryTurns, cts.Token);
 
 			try {
 				await client.RunTurnAsync(
@@ -355,9 +391,10 @@ namespace Mesen.Debugger.ViewModels
 						Dispatcher.UIThread.Post(() => assistantEntry.AppendText(delta));
 					},
 					onToolStatus: status => {
-						if(showToolCalls) {
-							Dispatcher.UIThread.Post(() => AddToolStatus(status));
-						}
+						// Only log non-tool-call status messages here (e.g. limit reached);
+						// per-tool detail is logged via AiTools.OnToolLog.
+						if(!status.StartsWith("[tool:"))
+							Dispatcher.UIThread.Post(() => AddToolLog(status));
 					},
 					ct: cts.Token);
 
@@ -389,33 +426,82 @@ namespace Mesen.Debugger.ViewModels
 			}
 		}
 
-		private void OnMonitorNewItem(ReviewQueueItem item)
+		/// <summary>
+		/// If TrimHistory would drop any turns from _history, summarizes the oldest portion
+		/// via a quick sub-request to the AI and replaces those messages with a compact
+		/// summary exchange. Falls back to TrimHistory's normal behavior on any error.
+		/// </summary>
+		private async Task TryCompactHistoryAsync(
+			IAiClient client, string apiKey, string model, int maxTurns, CancellationToken ct)
 		{
-			Dispatcher.UIThread.Post(() => {
-				string msg = $"Monitor: new unannotated {item.FlagsDisplay} at ${item.CpuAddress:X6} added to Review Queue.";
-				StatusText = msg;
+			var trimmed = AiMessageHelpers.TrimHistory(_history, maxTurns);
+			if(trimmed.Count >= _history.Count) return;  // history fits — nothing to compact
 
-				if(Config.MonitoringMode == AiMonitoringMode.AutoPause) {
-					EmuApi.Pause();
-					_ = AnalyzeQueueItemAsync(item);
+			int dropCount = _history.Count - trimmed.Count;
+			var oldPortion = _history.GetRange(0, dropCount);
+			if(oldPortion.Count == 0) return;
+
+			Dispatcher.UIThread.Post(() => StatusText = "Compacting conversation history...");
+
+			string prompt = AiMessageHelpers.BuildCompactionPrompt(oldPortion);
+			var tempMessages = new List<JsonObject> {
+				new JsonObject {
+					["role"] = "user",
+					["content"] = new JsonArray {
+						(JsonNode)new JsonObject { ["type"] = "text", ["text"] = prompt }
+					}
+				}
+			};
+
+			string summary = "";
+			try {
+				await client.RunTurnAsync(
+					apiKey: apiKey,
+					model: model,
+					maxTokens: 1500,
+					maxHistoryTurns: 1,
+					maxToolCallsPerTurn: 0,
+					systemPrompt: "You are a conversation summarizer. Be concise but preserve every specific detail: exact label names, addresses, findings, and any outstanding tasks.",
+					messages: tempMessages,
+					tools: new List<JsonObject>(),
+					toolExecutor: (_, _) => Task.FromResult(""),
+					onTextDelta: delta => summary += delta,
+					onToolStatus: _ => { },
+					ct: ct);
+			} catch(OperationCanceledException) {
+				throw;  // propagate cancellation — do not swallow
+			} catch {
+				// Non-fatal: silently fall back to TrimHistory's truncation
+				Dispatcher.UIThread.Post(() => StatusText = "AI is thinking...");
+				return;
+			}
+
+			if(string.IsNullOrWhiteSpace(summary)) return;
+
+			// Replace the old portion with a synthetic two-message summary exchange
+			_history.RemoveRange(0, dropCount);
+			_history.Insert(0, new JsonObject {
+				["role"] = "assistant",
+				["content"] = new JsonArray {
+					(JsonNode)new JsonObject {
+						["type"] = "text",
+						["text"] = $"[Summary of earlier conversation]\n\n{summary}"
+					}
 				}
 			});
-		}
-
-		private void OnBreakpointHit(BreakEvent evt, uint pc)
-		{
-			if(Config.MonitoringMode == AiMonitoringMode.Disabled) return;
+			_history.Insert(0, new JsonObject {
+				["role"] = "user",
+				["content"] = new JsonArray {
+					(JsonNode)new JsonObject {
+						["type"] = "text",
+						["text"] = "[Earlier context has been compacted. The following summary covers what we discussed before this point.]"
+					}
+				}
+			});
 
 			Dispatcher.UIThread.Post(() => {
-				if(IsBusy) return;  // Already mid-query; don't interrupt
-
-				string prompt = $"[Breakpoint hit at ${pc:X6} (breakpoint #{evt.BreakpointId})] " +
-				                $"The emulator has paused at this address. " +
-				                $"Read the CPU state and disassembly at ${pc:X6}, identify what code is running here, " +
-				                $"and apply labels/comments if the address is unannotated.";
-
-				StatusText = $"Breakpoint hit at ${pc:X6}";
-				_ = RunTurnAsync(prompt);
+				AddSystemMessage($"History compacted: {dropCount} older messages summarized to save context space.");
+				StatusText = "AI is thinking...";
 			});
 		}
 
@@ -714,11 +800,6 @@ delete_label
   Action: Remove the label at a SNES address.
   When: Correct a wrong label before setting the right one, or clean up auto-generated stubs.
 
-add_to_review_queue
-  Action: Queue a SNES address for deferred manual review with a reason note.
-  When: Code is too ambiguous to name now (needs more game execution context).
-        Provide a specific reason — not just 'unknown'.
-
 ### CPU state & registers
 get_cpu_state
   Returns: all 65816 registers (A, X, Y, SP, D, K, DBR, PC) and all PS flags.
@@ -790,7 +871,13 @@ remove_watch
 ### Call stack
 get_call_stack
   Returns: current subroutine call chain with source, target, and return address for each frame.
-  When: Understand the call depth and what routine called the current one. Requires paused emulation.");
+  When: Understand the call depth and what routine called the current one. Requires paused emulation.
+
+### Breakpoint events
+get_pending_breakpoints
+  Returns: all breakpoint events that fired while the AI was busy, with CPU type, full register state,
+  and disassembly captured at the moment each break occurred. Clears the queue after reading.
+  When: After finishing analysis of a breakpoint hit, call this to check for additional queued breaks.");
 
 			// ── Label taxonomy ────────────────────────────────────────────────────
 			sb.AppendLine();
@@ -879,12 +966,79 @@ After the user acts, call get_rom_map again to see new CDL coverage, then annota
 		private void ClearChat()
 		{
 			_cts?.Cancel();
-			SaveCurrentHistory();
+			BackToLive();
+			ArchiveCurrentSession();
 			_tools.Reset();
 			_history.Clear();
 			Messages.Clear();
 			ToolCallLog.Clear();
+			_pendingBreakContext.Clear();
 			AddSystemMessage("Chat cleared.");
+			LoadArchivedSessions();
+		}
+
+		public void ViewHistorySession(ChatHistoryEntry entry)
+		{
+			_archivedSessionMessages.Clear();
+			try {
+				var root = JsonNode.Parse(File.ReadAllText(entry.FilePath)) as JsonObject;
+				if(root?["messages"] is JsonArray msgs) {
+					foreach(var node in msgs) {
+						if(node is not JsonObject obj) continue;
+						var kind = (ChatEntry.EntryKind)(obj["kind"]?.GetValue<int>() ?? 0);
+						string text = obj["text"]?.GetValue<string>() ?? "";
+						DateTime ts = DateTime.TryParse(obj["ts"]?.GetValue<string>(), out var t) ? t : DateTime.Now;
+						_archivedSessionMessages.Add(new ChatEntry { Kind = kind, Text = text, Timestamp = ts });
+					}
+				}
+			} catch { }
+
+			HistorySessionLabel = entry.DisplayText;
+			ActiveMessages = _archivedSessionMessages;
+			IsViewingHistory = true;
+		}
+
+		private void BackToLive()
+		{
+			if(!IsViewingHistory) return;
+			ActiveMessages = Messages;
+			IsViewingHistory = false;
+			HistorySessionLabel = "";
+			_archivedSessionMessages.Clear();
+		}
+
+		private void ArchiveCurrentSession()
+		{
+			// Only archive if there's real content (not just system messages)
+			if(!Messages.Any(m => m.Kind != ChatEntry.EntryKind.System)) return;
+			if(string.IsNullOrEmpty(_historyPath)) return;
+
+			string dir = Path.GetDirectoryName(_historyPath) ?? "";
+			string stem = Path.GetFileNameWithoutExtension(_historyPath);
+			string ts = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+			string archivePath = Path.Combine(dir, $"{stem}.hist.{ts}.json");
+			SaveHistoryToPath(archivePath);
+		}
+
+		private void LoadArchivedSessions()
+		{
+			ArchivedSessions.Clear();
+			if(string.IsNullOrEmpty(_historyPath)) return;
+
+			string dir = Path.GetDirectoryName(_historyPath) ?? "";
+			if(!Directory.Exists(dir)) return;
+
+			string stem = Path.GetFileNameWithoutExtension(_historyPath);
+			string prefix = stem + ".hist.";
+
+			foreach(var file in Directory.GetFiles(dir, prefix + "*.json").OrderByDescending(f => f)) {
+				string fn = Path.GetFileName(file);
+				if(!fn.StartsWith(prefix) || !fn.EndsWith(".json")) continue;
+				string tsStr = fn.Substring(prefix.Length, fn.Length - prefix.Length - ".json".Length);
+				if(DateTime.TryParseExact(tsStr, "yyyyMMdd_HHmmss", null,
+					System.Globalization.DateTimeStyles.None, out var dt))
+					ArchivedSessions.Add(new ChatHistoryEntry { Timestamp = dt, FilePath = file });
+			}
 		}
 
 		private void AddEntry(ChatEntry.EntryKind kind, string text)
@@ -892,7 +1046,7 @@ After the user acts, call get_rom_map again to see new CDL coverage, then annota
 			Messages.Add(new ChatEntry { Kind = kind, Text = text });
 		}
 
-		private void AddToolStatus(string text)
+		private void AddToolLog(string text)
 		{
 			var entry = new ChatEntry { Kind = ChatEntry.EntryKind.ToolStatus, Text = text };
 			ToolCallLog.Add(entry);
@@ -905,9 +1059,6 @@ After the user acts, call get_rom_map again to see new CDL coverage, then annota
 		{
 			_cts?.Cancel();
 			SaveCurrentHistory();
-			_monitor.OnNewItem -= OnMonitorNewItem;
-			_monitor.OnBreakpointHit -= OnBreakpointHit;
-			_monitor.Dispose();
 		}
 	}
 }

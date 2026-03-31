@@ -304,7 +304,7 @@
 									FontSize="11" Padding="3,2" Margin="0,4,0,0"
 									ToolTip.Tip="Base URL of your OpenAI-compatible server (e.g. http://localhost:11434/v1)" />
 
-								<TextBlock Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Text="Local Key:" Margin="0,4,6,0"
+								<TextBlock Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Text="API Key:" Margin="0,4,6,0"
 									IsVisible="{Binding IsLocalAiProvider}" />
 								<TextBox Grid.Row="2" Grid.Column="1"
 									IsVisible="{Binding IsLocalAiProvider}"
@@ -329,7 +329,7 @@
 						</c:OptionSection>
 
 						<c:OptionSection Header="Behavior">
-							<Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto">
+							<Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto">
 								<TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" Text="Max Tokens:" Margin="0,0,6,2" />
 								<NumericUpDown Grid.Row="0" Grid.Column="1"
 									Value="{Binding AiConfig.MaxTokens}"
@@ -348,14 +348,7 @@
 									Value="{Binding AiConfig.MaxToolCallsPerTurn}"
 									Minimum="0" Maximum="200" Increment="5"
 									FormatString="0" FontSize="11" Padding="3,2" Margin="0,4,0,0" />
-
-								<TextBlock Grid.Row="3" Grid.Column="0" VerticalAlignment="Center" Text="Monitoring:" Margin="0,4,6,0" />
-								<c:EnumComboBox Grid.Row="3" Grid.Column="1"
-									SelectedItem="{Binding AiConfig.MonitoringMode}"
-									Margin="0,4,0,0" />
-							</Grid>
-							<CheckBox IsChecked="{Binding AiConfig.ShowToolCalls}"
-								Content="Show tool calls in chat" Margin="0,6,0,0" />
+								</Grid>
 						</c:OptionSection>
 					</StackPanel>
 				</ScrollViewer>

@@ -3070,11 +3070,6 @@ E
 			<Value ID="Claude">Claude (Anthropic)</Value>
 			<Value ID="OpenAiCompatible">OpenAI-compatible (Ollama, LM Studio…)</Value>
 		</Enum>
-		<Enum ID="AiMonitoringMode">
-			<Value ID="Disabled">Disabled</Value>
-			<Value ID="Queue">Queue (collect for review)</Value>
-			<Value ID="AutoPause">Auto-pause and analyze</Value>
-		</Enum>
 		<Enum ID="AddressDisplayType">
 			<Value ID="CpuAddress">CPU address</Value>
 			<Value ID="AbsAddress">ROM address</Value>

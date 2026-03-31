@@ -46,7 +46,7 @@ namespace Mesen.Debugger
 			FindResultListTool = new("Find Results");
 			ControllerListTool = new("Controllers");
 			AiChatTool = new("AI Chat");
-			AiQueueTool = new("AI Queue");
+			AiQueueTool = new("Tool Log");
 
 			_savedRootDef = savedRootDef;
 		}

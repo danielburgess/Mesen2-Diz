@@ -29,8 +29,14 @@ namespace Mesen.Debugger.AI
 		// Tracks disassembly addresses already fetched this session
 		private readonly HashSet<uint> _fetchedDisasmAddresses = new();
 
-		// Review queue ref injected so set_review_queue tool can add items
-		public ExecutionMonitor? Monitor { get; set; }
+		/// <summary>Called after each tool execution with a human-readable summary line.</summary>
+		public Action<string>? OnToolLog { get; set; }
+
+		/// <summary>
+		/// Called by get_pending_breakpoints to drain the queue.
+		/// Injected from AiCompanionViewModel so the tool can access pending break events.
+		/// </summary>
+		public Func<List<string>>? GetAndClearPendingBreaks { get; set; }
 
 		/// <summary>Clear caches on ROM load so stale data is never returned.</summary>
 		public void Reset()
@@ -143,13 +149,6 @@ namespace Mesen.Debugger.AI
 			Tool("get_annotation_summary",
 				"Get high-level statistics: total ROM bytes, CDL-covered code bytes, labeled functions, unannotated jump targets, etc.",
 				new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() }),
-
-			Tool("add_to_review_queue",
-				"Queue a SNES CPU address for later manual review with a reason note. Use this when you encounter code that needs more execution context before it can be annotated.",
-				Schema("", new() {
-					["address"] = Prop("string", "SNES CPU address as hex string"),
-					["reason"] = Prop("string", "Why this address needs review")
-				}, new[] { "address", "reason" })),
 
 		Tool("get_rom_map",
 			"Get a full ROM overview in one call: all labels (with approximate sizes and comments), CDL coverage stats, and contiguous unreached (CDL=0) address ranges. " +
@@ -406,6 +405,12 @@ namespace Mesen.Debugger.AI
 				["length"]  = Prop("integer", "Number of bytes to mark (1–65536)"),
 				["type"]    = Prop("string",  "CDL type: 'code', 'data', 'jump_target', 'sub_entry', or 'none' (clears all flags)")
 			}, new[] { "address", "length", "type" })),
+		Tool("get_pending_breakpoints",
+			"Drain the queue of breakpoint events that fired while the AI was busy. Each entry contains the CPU type, " +
+			"full CPU register state, and disassembly at the break address — captured at the moment the break occurred. " +
+			"Call this after finishing breakpoint analysis to check whether additional breaks hit during processing. " +
+			"The queue is cleared once read. Returns an empty result if no breaks are queued.",
+			new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() }),
 		};
 
 		// ── Tool executor ─────────────────────────────────────────────────────
@@ -413,7 +418,9 @@ namespace Mesen.Debugger.AI
 		public async Task<string> ExecuteAsync(string toolName, JsonObject input)
 		{
 			// All DebugApi/LabelManager calls must run on the UI thread
-			return await Dispatcher.UIThread.InvokeAsync(() => Execute(toolName, input));
+			string result = await Dispatcher.UIThread.InvokeAsync(() => Execute(toolName, input));
+			OnToolLog?.Invoke(BuildToolLogEntry(toolName, input, result));
+			return result;
 		}
 
 		private string Execute(string name, JsonObject input)
@@ -430,7 +437,6 @@ namespace Mesen.Debugger.AI
 					"delete_label"            => DoDeleteLabel(input),
 					"get_call_stack"          => DoGetCallStack(),
 					"get_annotation_summary"  => DoGetAnnotationSummary(),
-					"add_to_review_queue"     => DoAddToReviewQueue(input),
 					"get_rom_map"             => DoGetRomMap(input),
 					"pause_emulation"         => DoPauseEmulation(),
 					"resume_emulation"        => DoResumeEmulation(),
@@ -462,6 +468,7 @@ namespace Mesen.Debugger.AI
 					"add_watch"          => DoAddWatch(input),
 					"get_watches"        => DoGetWatches(),
 					"remove_watch"       => DoRemoveWatch(input),
+					"get_pending_breakpoints" => DoGetPendingBreakpoints(),
 					_ => $"Unknown tool: {name}"
 				};
 				// Append current CPU state + PC disassembly to every response except get_cpu_state
@@ -724,21 +731,77 @@ namespace Mesen.Debugger.AI
 			       $"Unannotated CDL targets: {unannotatedTargets:N0}";
 		}
 
-		private string DoAddToReviewQueue(JsonObject input)
+		private string BuildToolLogEntry(string name, JsonObject input, string result)
 		{
-			uint addr = ParseAddress(input["address"]?.GetValue<string>() ?? "0");
-			string reason = input["reason"]?.GetValue<string>() ?? "";
-			var absAddr = DebugApi.GetAbsoluteAddress(new AddressInfo { Address = (int)addr, Type = _cpuMemType });
+			// Extract meaningful summary for each tool rather than dumping raw result
+			string summary = name switch {
+				"set_labels" => ExtractSetLabelsSummary(result),
+				"set_label"  => ExtractSetLabelSummary(input, result),
+				"delete_label" => $"Deleted label at {input["address"]?.GetValue<string>() ?? "?"}",
+				"set_breakpoint" => $"Set breakpoint at {input["address"]?.GetValue<string>() ?? "?"}" +
+				                    (input["break_on"] != null ? $" [{input["break_on"]!.GetValue<string>()}]" : ""),
+				"remove_breakpoint" => $"Removed breakpoint at {input["address"]?.GetValue<string>() ?? "?"}",
+				"set_data_type" => $"Marked {input["length"]?.GetValue<int>() ?? 0} bytes as '{input["type"]?.GetValue<string>() ?? "?"}' at {input["address"]?.GetValue<string>() ?? "?"}",
+				"write_memory" => $"Wrote memory at {input["address"]?.GetValue<string>() ?? "?"}",
+				"set_cpu_registers" => $"Set CPU registers: {string.Join(", ", input.Select(kv => $"{kv.Key}={kv.Value}"))}",
+				"add_watch" => $"Added {(input["expressions"] as JsonArray)?.Count ?? 0} watch(es)",
+				"remove_watch" => $"Removed {(input["indexes"] as JsonArray)?.Count ?? 0} watch(es)",
+				"pause_emulation" => "Paused emulation",
+				"resume_emulation" => "Resumed emulation",
+				"reset_game" => $"Reset game ({input["type"]?.GetValue<string>() ?? "soft"})",
+				"step_into" => "Step into",
+				"step_over" => "Step over",
+				"step_out"  => "Step out",
+				"step_back" => "Step back",
+				"step_back_scanline" => "Step back scanline",
+				"step_back_frame"    => "Step back frame",
+				"run_cpu_cycle"      => "Run one CPU cycle",
+				"run_ppu_cycle"      => "Run one PPU cycle",
+				"run_one_frame"      => "Run one frame",
+				"run_to_nmi"         => "Run to NMI",
+				"run_to_irq"         => "Run to IRQ",
+				"run_to_scanline"    => $"Run to scanline {input["scanline"]?.GetValue<int>() ?? 0}",
+				"break_in"           => $"Break in {input["count"]?.GetValue<int>() ?? 1} {input["type"]?.GetValue<string>() ?? "instruction"}(s)",
+				"get_disassembly"    => $"Read disassembly at {input["address"]?.GetValue<string>() ?? "?"}",
+				"read_memory"        => $"Read memory at {input["address"]?.GetValue<string>() ?? "?"}",
+				"get_cdl_data"       => $"Read CDL data at rom offset {input["rom_offset"]?.GetValue<int>() ?? 0}",
+				"get_labels"         => "Fetched all labels",
+				"get_label_at"       => $"Got label at {input["address"]?.GetValue<string>() ?? "?"}",
+				"get_call_stack"     => "Fetched call stack",
+				"get_annotation_summary" => "Fetched annotation summary",
+				"get_rom_map"        => $"Fetched ROM map{(input["bank"] != null ? $" (bank {input["bank"]!.GetValue<string>()})" : "")}",
+				"get_cpu_state"      => "Fetched CPU state",
+				"get_unlabeled_functions" => "Fetched unlabeled functions",
+				"get_cdl_functions_paged" => $"Fetched CDL functions (bank {input["bank"]?.GetValue<string>() ?? "?"}, page {input["page"]?.GetValue<int>() ?? 0})",
+				"list_breakpoints"   => "Listed breakpoints",
+				"get_watches"        => "Fetched watches",
+				"get_pending_breakpoints" => "Drained pending breakpoint queue",
+				_ => name
+			};
 
-			Monitor?.AddToQueue(new ReviewQueueItem {
-				CpuAddress = addr,
-				RomOffset = absAddr.Address >= 0 ? (uint)absAddr.Address : 0,
-				Reason = reason,
-				Source = ReviewQueueItemSource.AiRequested
-			});
-			return $"Added ${addr:X6} to review queue: {reason}";
+			string ts = DateTime.Now.ToString("HH:mm:ss");
+			return $"[{ts}] {summary}";
 		}
 
+		private static string ExtractSetLabelsSummary(string result)
+		{
+			// result starts with "Set N labels" or "Set N labels, skipped M"
+			int set = 0, skipped = 0;
+			var setMatch = System.Text.RegularExpressions.Regex.Match(result, @"Set (\d+) label");
+			var skipMatch = System.Text.RegularExpressions.Regex.Match(result, @"skipped (\d+)");
+			if(setMatch.Success) set = int.Parse(setMatch.Groups[1].Value);
+			if(skipMatch.Success) skipped = int.Parse(skipMatch.Groups[1].Value);
+			return skipped > 0 ? $"set_labels: Set {set}, skipped {skipped}" : $"set_labels: Set {set}";
+		}
+
+		private static string ExtractSetLabelSummary(JsonObject input, string result)
+		{
+			string addr = input["address"]?.GetValue<string>() ?? "?";
+			string name2 = input["name"]?.GetValue<string>() ?? "";
+			return string.IsNullOrEmpty(name2)
+				? $"set_label: Updated {addr}"
+				: $"set_label: {addr} → {name2}";
+		}
 
 		private string DoGetRomMap(JsonObject input)
 		{
@@ -1288,17 +1351,89 @@ namespace Mesen.Debugger.AI
 			sb.AppendLine($"PS=${( byte)f:X2}  N={n.B()} V={v.B()} M={m.B()} X={xi.B()} D={dl.B()} I={ii.B()} Z={z.B()} C={c.B()}  Mode={(s.EmulationMode ? "Emulation" : "Native")}");
 
 			uint pcAddr = ((uint)s.K << 16) | s.PC;
-			var rows = DebugApi.GetDisassemblyOutput(_cpu, pcAddr, 6);
-			if(rows.Length > 0) {
-				sb.AppendLine("Disasm at PC:");
-				foreach(var row in rows) {
-					string marker  = (row.Address >= 0 && (uint)row.Address == pcAddr) ? "▶" : " ";
-					string addrStr = row.Address >= 0 ? $"${row.Address:X6}" : "      ";
-					string cmt     = row.Comment.Length > 0 ? $"  ; {row.Comment}" : "";
-					sb.AppendLine($"  {marker}{addrStr}  {row.Text.PadRight(24)}{cmt}");
+			AppendDisasmAtPc(sb, _cpu, pcAddr);
+
+			return sb.ToString();
+		}
+
+		/// <summary>
+		/// Builds a snapshot of CPU state + disassembly for any supported CPU type.
+		/// Called at the moment a breakpoint fires so the context is captured immediately.
+		/// </summary>
+		public string BuildBreakContext(CpuType cpu)
+		{
+			if(DebugApi.GetMemorySize(_romMemType) <= 0) return "";
+
+			var sb = new StringBuilder();
+			sb.AppendLine($"--- {cpu} CPU State (breakpoint) ---");
+
+			switch(cpu) {
+				case CpuType.Snes:
+				case CpuType.Sa1: {
+					var s  = DebugApi.GetCpuState<SnesCpuState>(cpu);
+					var f  = s.PS;
+					bool n  = (f & SnesCpuFlags.Negative)   != 0;
+					bool v  = (f & SnesCpuFlags.Overflow)    != 0;
+					bool m  = (f & SnesCpuFlags.MemoryMode8) != 0;
+					bool xi = (f & SnesCpuFlags.IndexMode8)  != 0;
+					bool dl = (f & SnesCpuFlags.Decimal)     != 0;
+					bool ii = (f & SnesCpuFlags.IrqDisable)  != 0;
+					bool z  = (f & SnesCpuFlags.Zero)        != 0;
+					bool c  = (f & SnesCpuFlags.Carry)       != 0;
+					sb.AppendLine($"PC=${s.K:X2}:{s.PC:X4}  A=${s.A:X4}  X=${s.X:X4}  Y=${s.Y:X4}  SP=${s.SP:X4}  D=${s.D:X4}  DBR=${s.DBR:X2}");
+					sb.AppendLine($"PS=${( byte)f:X2}  N={n.B()} V={v.B()} M={m.B()} X={xi.B()} D={dl.B()} I={ii.B()} Z={z.B()} C={c.B()}  Mode={(s.EmulationMode ? "Emulation" : "Native")}");
+					AppendDisasmAtPc(sb, cpu, ((uint)s.K << 16) | s.PC);
+					break;
 				}
+				case CpuType.Gsu: {
+					var s = DebugApi.GetCpuState<GsuState>(cpu);
+					sb.AppendLine($"PC=${s.ProgramBank:X2}:{s.R[15]:X4}  RomBank=${s.RomBank:X2}  RamBank=${s.RamBank:X2}");
+					sb.Append("Regs: ");
+					for(int i = 0; i < 16; i++) sb.Append($"R{i}=${s.R[i]:X4} ");
+					sb.AppendLine();
+					sb.AppendLine($"SFR: Z={s.SFR.Zero.B()} C={s.SFR.Carry.B()} S={s.SFR.Sign.B()} OV={s.SFR.Overflow.B()} Running={s.SFR.Running.B()}");
+					AppendDisasmAtPc(sb, cpu, ((uint)s.ProgramBank << 16) | s.R[15]);
+					break;
+				}
+				case CpuType.NecDsp: {
+					var s = DebugApi.GetCpuState<NecDspState>(cpu);
+					sb.AppendLine($"PC=${s.PC:X4}  A=${s.A:X4}  B=${s.B:X4}  TR=${s.TR:X4}  DP=${s.DP:X4}  SP=${s.SP:X2}");
+					AppendDisasmAtPc(sb, cpu, s.PC);
+					break;
+				}
+				default:
+					sb.AppendLine($"(No register formatter for {cpu})");
+					break;
 			}
 
+			return sb.ToString();
+		}
+
+		private static void AppendDisasmAtPc(StringBuilder sb, CpuType cpu, uint pcAddr)
+		{
+			var rows = DebugApi.GetDisassemblyOutput(cpu, pcAddr, 6);
+			if(rows.Length == 0) return;
+			sb.AppendLine("Disasm at PC:");
+			foreach(var row in rows) {
+				string marker  = (row.Address >= 0 && (uint)row.Address == pcAddr) ? "▶" : " ";
+				string addrStr = row.Address >= 0 ? $"${row.Address:X6}" : "      ";
+				string cmt     = row.Comment.Length > 0 ? $"  ; {row.Comment}" : "";
+				sb.AppendLine($"  {marker}{addrStr}  {row.Text.PadRight(24)}{cmt}");
+			}
+		}
+
+		private string DoGetPendingBreakpoints()
+		{
+			var entries = GetAndClearPendingBreaks?.Invoke();
+			if(entries == null || entries.Count == 0)
+				return "No pending breakpoints.";
+
+			var sb = new StringBuilder();
+			sb.AppendLine($"{entries.Count} pending breakpoint(s):");
+			foreach(var entry in entries) {
+				sb.AppendLine("---");
+				sb.AppendLine(entry);
+			}
 			return sb.ToString();
 		}
 

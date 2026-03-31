@@ -18,28 +18,21 @@
 			BorderThickness="0,0,0,1"
 			BorderBrush="{StaticResource MesenBorderColor}"
 			Padding="4,3">
-			<Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto">
-
-				<!-- Monitor mode -->
-				<TextBlock Grid.Column="0" Text="Monitor:" FontSize="11"
-					VerticalAlignment="Center" Margin="0,0,4,0" />
-				<c:EnumComboBox Grid.Column="1"
-					SelectedItem="{Binding Config.MonitoringMode}"
-					FontSize="11" />
+			<Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto">
 
 				<!-- Context file -->
-				<TextBlock Grid.Column="2" Margin="8,0,2,0" FontSize="11"
+				<TextBlock Grid.Column="0" Margin="0,0,2,0" FontSize="11"
 					VerticalAlignment="Center"
 					Text="{Binding ContextStatusText}"
 					Foreground="{StaticResource MesenTextMutedColor}"
 					FontStyle="Italic"
 					ToolTip.Tip="Context file loaded into every prompt" />
-				<Button Grid.Column="3" Padding="4,1" FontSize="11"
+				<Button Grid.Column="1" Padding="4,1" FontSize="11"
 					Click="OnLoadContextClick"
 					ToolTip.Tip="Load a context file (.txt / .md)">
 					<TextBlock Text="ctx…" FontSize="11" />
 				</Button>
-				<Button Grid.Column="4" Padding="4,1" FontSize="11"
+				<Button Grid.Column="2" Padding="4,1" FontSize="11"
 					Command="{Binding ClearContextCommand}"
 					IsVisible="{Binding Config.ContextFilePath, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
 					ToolTip.Tip="Clear context file">
@@ -47,17 +40,67 @@
 				</Button>
 
 				<!-- Provider + model (read-only; configure in Debugger Settings) -->
-				<TextBlock Grid.Column="5" Margin="8,0,0,0" FontSize="11"
+				<TextBlock Grid.Column="3" Margin="8,0,0,0" FontSize="11"
 					VerticalAlignment="Center"
 					Text="{Binding ProviderModelDisplay}"
 					Foreground="{StaticResource MesenTextMutedColor}"
 					ToolTip.Tip="Active provider and model — configure in Debugger Settings → AI Companion" />
 
+				<!-- History button -->
+				<Button Grid.Column="4" Margin="4,0,0,0" Padding="6,2"
+					IsEnabled="{Binding HasArchivedSessions}"
+					ToolTip.Tip="Browse previous chat sessions">
+					<Button.Flyout>
+						<Flyout Placement="BottomEdgeAlignedRight">
+							<Border Padding="4" MinWidth="230">
+								<ScrollViewer MaxHeight="220" HorizontalScrollBarVisibility="Disabled">
+									<ItemsControl ItemsSource="{Binding ArchivedSessions}">
+										<ItemsControl.ItemTemplate>
+											<DataTemplate x:DataType="vm:ChatHistoryEntry">
+												<Button Content="{Binding DisplayText}"
+													HorizontalAlignment="Stretch"
+													HorizontalContentAlignment="Left"
+													Click="OnHistorySessionClick"
+													Tag="{Binding}"
+													Padding="6,4" FontSize="11"
+													Margin="0,1"
+													Background="Transparent" />
+											</DataTemplate>
+										</ItemsControl.ItemTemplate>
+									</ItemsControl>
+								</ScrollViewer>
+							</Border>
+						</Flyout>
+					</Button.Flyout>
+					<TextBlock Text="History" FontSize="11" />
+				</Button>
+
 				<!-- Clear chat -->
-				<Button Grid.Column="6" Margin="4,0,0,0" Padding="6,2"
+				<Button Grid.Column="5" Margin="4,0,0,0" Padding="6,2"
 					Command="{Binding ClearCommand}"
 					ToolTip.Tip="Clear chat history">
 					<TextBlock Text="Clear" FontSize="11" />
+				</Button>
+			</Grid>
+		</Border>
+
+		<!-- History banner (visible when browsing an archived session) -->
+		<Border DockPanel.Dock="Top"
+			IsVisible="{Binding IsViewingHistory}"
+			BorderThickness="0,0,0,1"
+			BorderBrush="{StaticResource MesenBorderColor}"
+			Background="{StaticResource MesenGrayBackgroundColor}"
+			Padding="6,3">
+			<Grid ColumnDefinitions="*,Auto">
+				<TextBlock Grid.Column="0"
+					Text="{Binding HistorySessionLabel}"
+					FontSize="11" FontStyle="Italic"
+					Foreground="{StaticResource MesenTextMutedColor}"
+					VerticalAlignment="Center" />
+				<Button Grid.Column="1" Padding="6,2" FontSize="11"
+					Command="{Binding BackToLiveCommand}"
+					ToolTip.Tip="Return to the live chat session">
+					<TextBlock Text="← Live" FontSize="11" />
 				</Button>
 			</Grid>
 		</Border>
@@ -78,8 +121,9 @@
 			</Grid>
 		</Border>
 
-		<!-- Input row -->
+		<!-- Input row (hidden when viewing history) -->
 		<Border DockPanel.Dock="Bottom"
+			IsVisible="{Binding IsViewingHistory, Converter={x:Static BoolConverters.Not}}"
 			BorderThickness="0,1,0,0"
 			BorderBrush="{StaticResource MesenBorderColor}"
 			Padding="4">
@@ -111,7 +155,7 @@
 		<!-- Message list -->
 		<ScrollViewer x:Name="chatScroll" HorizontalScrollBarVisibility="Disabled"
 			ScrollChanged="OnChatScrollChanged">
-			<ItemsControl ItemsSource="{Binding Messages}" Margin="4">
+			<ItemsControl ItemsSource="{Binding ActiveMessages}" Margin="4">
 				<ItemsControl.ItemTemplate>
 					<DataTemplate x:DataType="vm:ChatEntry">
 						<Panel Margin="2,3">
@@ -121,9 +165,18 @@
 								Background="{StaticResource MesenBlueColor}"
 								CornerRadius="6" Padding="8,5"
 								HorizontalAlignment="Right" MaxWidth="480">
-								<SelectableTextBlock Text="{Binding Text}"
-									Foreground="White"
-									TextWrapping="Wrap" FontSize="12" />
+								<StackPanel>
+									<SelectableTextBlock Text="{Binding Text}"
+										Foreground="White"
+										TextWrapping="Wrap" FontSize="12" />
+									<Button HorizontalAlignment="Right" Click="OnCopyClick"
+										Margin="0,4,0,0" Padding="4,1" FontSize="10"
+										Background="Transparent" BorderThickness="0"
+										Foreground="White" Opacity="0.7" Cursor="Hand"
+										ToolTip.Tip="Copy to clipboard">
+										<TextBlock Text="⎘ copy" FontSize="10" />
+									</Button>
+								</StackPanel>
 							</Border>
 
 							<!-- Assistant message: left-aligned bubble -->
@@ -146,6 +199,14 @@
 										MarkdownStyleName="GithubLike"
 										SelectionEnabled = "true"
 										HorizontalAlignment="Stretch" />
+
+									<Button HorizontalAlignment="Right" Click="OnCopyClick"
+										Margin="0,4,0,0" Padding="4,1" FontSize="10"
+										Background="Transparent" BorderThickness="0"
+										Opacity="0.7" Cursor="Hand"
+										ToolTip.Tip="Copy to clipboard">
+										<TextBlock Text="⎘ copy" FontSize="10" />
+									</Button>
 								</StackPanel>
 							</Border>
 
@@ -172,9 +233,18 @@
 								Background="{StaticResource MesenErrorColor}"
 								CornerRadius="4" Padding="8,5"
 								HorizontalAlignment="Stretch">
-								<SelectableTextBlock Text="{Binding Text}"
-									Foreground="White"
-									TextWrapping="Wrap" FontSize="12" />
+								<StackPanel>
+									<SelectableTextBlock Text="{Binding Text}"
+										Foreground="White"
+										TextWrapping="Wrap" FontSize="12" />
+									<Button HorizontalAlignment="Right" Click="OnCopyClick"
+										Margin="0,4,0,0" Padding="4,1" FontSize="10"
+										Background="Transparent" BorderThickness="0"
+										Foreground="White" Opacity="0.7" Cursor="Hand"
+										ToolTip.Tip="Copy to clipboard">
+										<TextBlock Text="⎘ copy" FontSize="10" />
+									</Button>
+								</StackPanel>
 							</Border>
 
 						</Panel>

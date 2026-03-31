@@ -135,6 +135,7 @@ namespace Mesen.Debugger.Windows
 						BreakpointManager.ClearTemporaryBreakpoints();
 
 						_model.UpdateDebugger(true, evt);
+						_model.AiCompanion.OnBreakpointHit(evt);
 						if(!_suppressBringToFront) {
 							bool isPause = evt.Source == BreakSource.Pause;
 							bool isBreak = !isPause && evt.Source != BreakSource.PpuStep && evt.Source != BreakSource.InternalOperation;

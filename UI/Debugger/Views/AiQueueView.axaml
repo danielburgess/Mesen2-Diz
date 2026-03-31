@@ -4,89 +4,30 @@
 	xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
 	xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
 	xmlns:vm="using:Mesen.Debugger.ViewModels"
-	xmlns:ai="using:Mesen.Debugger.AI"
 	mc:Ignorable="d" d:DesignWidth="280" d:DesignHeight="300"
 	x:DataType="vm:AiCompanionQueueViewModel"
 	x:Class="Mesen.Debugger.Views.AiQueueView"
 >
-	<TabControl>
-
-		<!-- Tool Call Log tab -->
-		<TabItem Header="Tool Log">
-			<ScrollViewer x:Name="toolLogScroll" HorizontalScrollBarVisibility="Disabled">
-				<ItemsControl ItemsSource="{Binding ToolCallLog}" Margin="4">
-					<ItemsControl.ItemTemplate>
-						<DataTemplate x:DataType="vm:ChatEntry">
-							<Grid ColumnDefinitions="50,*" Margin="0,1">
-								<TextBlock Grid.Column="0"
-									Text="{Binding TimestampDisplay}"
-									FontSize="10"
-									Foreground="{StaticResource MesenTextMutedColor}"
-									VerticalAlignment="Center" />
-								<TextBlock Grid.Column="1"
-									Text="{Binding Text}"
-									FontSize="11"
-									FontStyle="Italic"
-									Foreground="{StaticResource MesenTextMutedColor}"
-									TextWrapping="Wrap"
-									VerticalAlignment="Center" />
-							</Grid>
-						</DataTemplate>
-					</ItemsControl.ItemTemplate>
-				</ItemsControl>
-			</ScrollViewer>
-		</TabItem>
-
-		<!-- Review Queue tab -->
-		<TabItem>
-			<TabItem.Header>
-				<StackPanel Orientation="Horizontal" Spacing="4">
-					<TextBlock Text="Review Queue" VerticalAlignment="Center" />
-					<Border Background="{StaticResource MesenBlueColor}"
-						CornerRadius="8" Padding="5,1"
-						IsVisible="{Binding ReviewQueueHasItems}">
-						<TextBlock Text="{Binding ReviewQueue.Count}"
-							Foreground="White" FontSize="10" VerticalAlignment="Center" />
-					</Border>
-				</StackPanel>
-			</TabItem.Header>
-
-			<DockPanel>
-				<TextBlock DockPanel.Dock="Top" Margin="6,4"
-					FontSize="11" TextWrapping="Wrap"
-					Foreground="{StaticResource MesenTextMutedColor}"
-					Text="Unannotated branch/sub targets encountered during execution." />
-
-				<ListBox ItemsSource="{Binding ReviewQueue}" Margin="4">
-					<ListBox.ItemTemplate>
-						<DataTemplate x:DataType="ai:ReviewQueueItem">
-							<Grid ColumnDefinitions="70,*,20,Auto" Margin="0,2">
-								<TextBlock Grid.Column="0"
-									Text="{Binding AddressDisplay}"
-									FontFamily="Courier New,Monospace" FontSize="12"
-									VerticalAlignment="Center" />
-								<StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1" Margin="4,0">
-									<TextBlock Text="{Binding FlagsDisplay}"
-										FontSize="11" FontWeight="Bold" />
-									<TextBlock Text="{Binding Reason}"
-										FontSize="10" TextWrapping="Wrap"
-										IsVisible="{Binding Reason, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-								</StackPanel>
-								<TextBlock Grid.Column="2" Text="✓"
-									IsVisible="{Binding IsAnalyzed}"
-									Foreground="Green" FontSize="14"
-									VerticalAlignment="Center" />
-								<Button Grid.Column="3"
-									Content="Analyze"
-									Padding="6,2" FontSize="11"
-									Click="OnAnalyzeClick"
-									Tag="{Binding}" />
-							</Grid>
-						</DataTemplate>
-					</ListBox.ItemTemplate>
-				</ListBox>
-			</DockPanel>
-		</TabItem>
-
-	</TabControl>
+	<ScrollViewer x:Name="toolLogScroll" HorizontalScrollBarVisibility="Disabled">
+		<ItemsControl ItemsSource="{Binding ToolCallLog}" Margin="4">
+			<ItemsControl.ItemTemplate>
+				<DataTemplate x:DataType="vm:ChatEntry">
+					<Grid ColumnDefinitions="50,*" Margin="0,1">
+						<TextBlock Grid.Column="0"
+							Text="{Binding TimestampDisplay}"
+							FontSize="10"
+							Foreground="{StaticResource MesenTextMutedColor}"
+							VerticalAlignment="Center" />
+						<TextBlock Grid.Column="1"
+							Text="{Binding Text}"
+							FontSize="11"
+							FontStyle="Italic"
+							Foreground="{StaticResource MesenTextMutedColor}"
+							TextWrapping="Wrap"
+							VerticalAlignment="Center" />
+					</Grid>
+				</DataTemplate>
+			</ItemsControl.ItemTemplate>
+		</ItemsControl>
+	</ScrollViewer>
 </UserControl>

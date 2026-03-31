@@ -34,7 +34,6 @@ namespace Mesen.Debugger.Views
 			base.OnDataContextChanged(e);
 			if(DataContext is AiCompanionViewModel model) {
 				_model = model;
-				// No longer auto-scroll here — OnChatScrollChanged handles it
 			}
 		}
 
@@ -82,6 +81,20 @@ namespace Mesen.Debugger.Views
 			string? path = await FileDialogHelper.OpenFile(null, VisualRoot, "txt", "md", "*");
 			if(path != null)
 				_model.LoadContextFile(path);
+		}
+
+		private async void OnCopyClick(object? sender, RoutedEventArgs e)
+		{
+			if(sender is not Button btn || btn.DataContext is not ChatEntry entry) return;
+			var clipboard = ApplicationHelper.GetMainWindow()?.Clipboard;
+			if(clipboard != null)
+				await clipboard.SetTextAsync(entry.Text);
+		}
+
+		private void OnHistorySessionClick(object? sender, RoutedEventArgs e)
+		{
+			if(sender is Button btn && btn.Tag is ChatHistoryEntry entry && _model != null)
+				_model.ViewHistorySession(entry);
 		}
 	}
 }
