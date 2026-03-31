@@ -184,12 +184,27 @@ namespace Mesen.Debugger.AI
 			new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() }),
 
 		Tool("set_breakpoint",
-			"Add a breakpoint. Emulation pauses when the condition is met.",
+			"Add a breakpoint. Emulation pauses when execution/access hits the address (or range) and the optional condition is true.\n" +
+			"\nbreak_on modes:\n" +
+			"  exec       — pause when the CPU executes the instruction at this address (default)\n" +
+			"  read       — pause on any read from this address\n" +
+			"  write      — pause on any write to this address\n" +
+			"  read_write — pause on read OR write\n" +
+			"  all        — pause on exec, read, or write\n" +
+			"\nCondition expression syntax (C-like, evaluated each time the breakpoint is hit):\n" +
+			"  Registers : A, X, Y, SP, PC, K, DBR, D, PS\n" +
+			"  Flags     : N, V, M, IX (X), D, I, Z, C  (each is 0 or 1)\n" +
+			"  Memory    : [$7E0010] reads 1 byte from CPU-bus address; [label] reads from a named label\n" +
+			"  Operators : == != < > <= >= && || ! + - * / & | ^ ~ << >>\n" +
+			"  Literals  : decimal (10), hex ($1A), binary (%00011010)\n" +
+			"  Examples  : \"A == $FF\"  \"X > 0 && [$7E0040] != 0\"  \"PS & $20\" (M flag set)\n" +
+			"\nFor a range breakpoint supply both address and end_address (e.g. any write to $7E0100–$7E01FF).",
 			Schema("", new() {
-				["address"]     = Prop("string",  "SNES CPU address as hex string ($BBAAAA)"),
+				["address"]     = Prop("string",  "Start SNES CPU address as hex string ($BBAAAA)"),
+				["end_address"] = Prop("string",  "Optional end address for a range breakpoint. If omitted, breakpoint applies to the single address only."),
 				["break_on"]    = Prop("string",  "exec (default), read, write, read_write, or all"),
 				["memory_type"] = Prop("string",  "cpu (default = CPU bus), work_ram, save_ram, vram, oam, cgram"),
-				["condition"]   = Prop("string",  "Optional condition expression, e.g. A == $10")
+				["condition"]   = Prop("string",  "Optional condition expression (see description). Leave empty to always break.")
 			}, new[] { "address" })),
 
 		Tool("remove_breakpoint",
@@ -228,6 +243,169 @@ namespace Mesen.Debugger.AI
 				["dbr"] = Prop("integer", "Data bank register (0-255)"),
 				["ps"]  = Prop("integer", "Processor status byte: bit0=C bit1=Z bit2=I bit3=D bit4=X(idx8) bit5=M(mem8) bit6=V bit7=N")
 			}, Array.Empty<string>())),
+
+		// ── CDL function enumeration ───────────────────────────────────────
+
+		Tool("get_unlabeled_functions",
+			"Get CDL-identified function entry points (SubEntryPoint-flagged addresses) that are missing a label name, a comment, or both. " +
+			"Use this to discover unannotated functions that still need annotation work. Each result includes the SNES address, ROM offset, " +
+			"CDL flags, and whatever label/comment currently exists. Also returns the current CPU state at the bottom of the response. " +
+			"Preferred over get_annotation_summary when you want an actionable list rather than aggregate counts.",
+			Schema("", new() {
+				["filter"]      = Prop("string",  "Which entries to include: 'no_label' (name is empty), 'no_comment' (comment is empty), " +
+				                                   "'either' (name OR comment empty — default), 'both' (name AND comment both empty)"),
+				["bank"]        = Prop("string",  "Optional: restrict to one SNES bank, e.g. \"$80\". Omit to search all banks."),
+				["max_results"] = Prop("integer", "Maximum entries to return (1–1000, default 200)")
+			}, Array.Empty<string>())),
+
+		Tool("get_cdl_functions_paged",
+			"Get a paged list of all CDL-identified functions in a single SNES bank, with optional filtering. Each entry includes SNES address, " +
+			"ROM offset, CDL flags, current label name, and comment. Use this to systematically enumerate and work through every function in a bank " +
+			"without fetching the entire ROM at once. Iterate pages by incrementing the page parameter. Also returns the current CPU state. " +
+			"Use get_unlabeled_functions instead when you only want functions that still need work across all banks.",
+			Schema("", new() {
+				["bank"]      = Prop("string",  "SNES bank to enumerate (required), e.g. \"$80\" or \"80\""),
+				["page"]      = Prop("integer", "Page number, 0-based (default 0)"),
+				["page_size"] = Prop("integer", "Functions per page (1–200, default 50)"),
+				["filter"]    = Prop("string",  "Filter entries: 'all' (default), 'no_label' (no name), 'no_comment' (no comment), " +
+				                                "'unannotated' (no name AND no comment), 'labeled' (has a name)")
+			}, new[] { "bank" })),
+
+		// ── Execution stepping ────────────────────────────────────────────
+
+		Tool("step_into",
+			"Execute one CPU instruction, following JSR/JSL calls down into subroutines. " +
+			"Emulation must be paused. Returns the new CPU state and disassembly at the resulting PC.",
+			new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() }),
+
+		Tool("step_over",
+			"Execute one CPU instruction, treating JSR/JSL calls as a single step (runs the called routine and returns). " +
+			"Emulation must be paused. Returns new CPU state and disassembly at the resulting PC.",
+			new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() }),
+
+		Tool("step_out",
+			"Run until the current subroutine returns (executes until the matching RTS/RTL/RTI), then pause. " +
+			"Emulation must be paused. Returns new CPU state after return.",
+			new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() }),
+
+		Tool("step_back",
+			"Undo the most recently executed instruction (step backward one instruction). " +
+			"Requires the step-back feature to be enabled in debugger settings. Emulation must be paused.",
+			new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() }),
+
+		Tool("step_back_scanline",
+			"Rewind execution to the start of the previous PPU scanline. " +
+			"Requires step-back feature. Emulation must be paused.",
+			new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() }),
+
+		Tool("step_back_frame",
+			"Rewind execution to the start of the previous video frame. " +
+			"Requires step-back feature. Emulation must be paused.",
+			new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() }),
+
+		Tool("run_cpu_cycle",
+			"Advance execution by exactly one CPU master clock cycle, then pause. " +
+			"Much finer-grained than step_into. Emulation must be paused.",
+			new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() }),
+
+		Tool("run_ppu_cycle",
+			"Advance execution by exactly one PPU dot (pixel clock cycle), then pause. " +
+			"Use this to observe PPU state changes at sub-scanline precision. Emulation must be paused.",
+			new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() }),
+
+		Tool("run_one_frame",
+			"Advance execution by one complete video frame (262 scanlines on NTSC SNES), then pause. " +
+			"Useful for observing per-frame state changes. Emulation must be paused.",
+			new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() }),
+
+		Tool("run_to_nmi",
+			"Resume execution and pause at the next NMI (non-maskable interrupt / V-blank start). " +
+			"On SNES, NMI fires once per frame at the start of V-blank (~scanline 225 NTSC). " +
+			"Emulation must be paused.",
+			new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() }),
+
+		Tool("run_to_irq",
+			"Resume execution and pause at the next IRQ (maskable hardware interrupt). " +
+			"Emulation must be paused.",
+			new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() }),
+
+		Tool("run_to_scanline",
+			"Resume execution and pause at the start of a specific PPU scanline. " +
+			"SNES NTSC scanline reference: 0–224 = active display, 225 = last visible line, " +
+			"225–239 = overscan, 240–261 = V-blank (NMI fires around scanline 225). " +
+			"Emulation must be paused.",
+			Schema("", new() {
+				["scanline"] = Prop("integer", "Target scanline number (0–261 for NTSC SNES)")
+			}, new[] { "scanline" })),
+
+		Tool("break_in",
+			"Resume execution and pause again after advancing N steps of a specified type. " +
+			"Equivalent to the debugger's 'Break In' dialog — useful to skip ahead by a known number of " +
+			"instructions or frames without single-stepping through each one. Emulation must be paused.\n" +
+			"type values: 'instruction' (default), 'cpu_cycle', 'ppu_cycle', 'ppu_scanline', 'ppu_frame'",
+			Schema("", new() {
+				["count"] = Prop("integer", "Number of steps to advance before pausing (default 1, min 1)"),
+				["type"]  = Prop("string",  "Step unit: 'instruction' (default), 'cpu_cycle', 'ppu_cycle', 'ppu_scanline', 'ppu_frame'")
+			}, Array.Empty<string>())),
+
+		// ── Watch expressions ──────────────────────────────────────────────
+
+		Tool("add_watch",
+			"Add one or more watch expressions. Watches are evaluated continuously in the debugger's watch panel.\n" +
+			"Expression syntax:\n" +
+			"  CPU registers : A, X, Y, SP, PC, K, DBR, D, PS\n" +
+			"  CPU flags     : N, V, M, IX (X flag), D, I, Z, C  (each 0 or 1)\n" +
+			"  Memory read   : [$7E0010] reads 1 byte; [label] reads memory at a named label's address\n" +
+			"  Array display : [$300, 16] shows 16 bytes starting at address $300 as space-separated values\n" +
+			"  Arithmetic    : A + [$300], X * 2, ([$7E0040] << 8) | [$7E0041]\n" +
+			"  Operators     : + - * / & | ^ ~ << >> == != < > <= >= && || !\n" +
+			"  Literals      : decimal (255), hex ($FF), binary (%11111111)\n" +
+			"Format suffix (append ', FORMAT' to expression):\n" +
+			"  ', H'  = hex 1-byte (e.g. 'A, H' → $FF)\n" +
+			"  ', H2' = hex 2-byte (e.g. 'A, H2' → $00FF)\n" +
+			"  ', S'  = signed decimal\n" +
+			"  ', U'  = unsigned decimal\n" +
+			"  ', B'  = binary\n" +
+			"Examples: 'A, H2'  '[$7E0040], H'  '[$300, 8]'  'X > 0 && [$7E0050] != 0'",
+			Schema("", new() {
+				["expressions"] = new JsonObject {
+					["type"] = "array",
+					["description"] = "One or more watch expression strings to add.",
+					["items"] = new JsonObject { ["type"] = "string" }
+				}
+			}, new[] { "expressions" })),
+
+		Tool("get_watches",
+			"List all current watch expressions along with their evaluated values. " +
+			"Returns the 0-based index, expression string, and current value for each watch. " +
+			"The index is used with remove_watch to delete individual watches.",
+			new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() }),
+
+		Tool("remove_watch",
+			"Remove one or more watch expressions by their 0-based index. " +
+			"Use get_watches first to see current entries and their indexes.",
+			Schema("", new() {
+				["indexes"] = new JsonObject {
+					["type"] = "array",
+					["description"] = "0-based indexes of watches to remove.",
+					["items"] = new JsonObject { ["type"] = "integer" }
+				}
+			}, new[] { "indexes" })),
+
+		// ── CDL type annotation ────────────────────────────────────────────
+
+		Tool("set_data_type",
+			"Explicitly mark an address range in ROM with a CDL type flag: Code, Data, JumpTarget, SubEntryPoint, or None (clears all flags). " +
+			"Use this to correct or pre-populate CDL information — for example, mark a known data table as 'data', or declare a routine " +
+			"entry point as 'sub_entry' so the disassembler treats it correctly before emulation has covered it. " +
+			"The address is a SNES CPU address ($BBAAAA) and the range must map to PRG ROM. " +
+			"Note: 'code' and 'data' flags are also set automatically by the CDL as execution/data access occurs; " +
+			"'jump_target' and 'sub_entry' are set by branch/JSR targets; use 'none' to clear erroneous flags.",
+			Schema("", new() {
+				["address"] = Prop("string",  "SNES CPU address of the start of the range (e.g. \"$80A300\")"),
+				["length"]  = Prop("integer", "Number of bytes to mark (1–65536)"),
+				["type"]    = Prop("string",  "CDL type: 'code', 'data', 'jump_target', 'sub_entry', or 'none' (clears all flags)")
+			}, new[] { "address", "length", "type" })),
 		};
 
 		// ── Tool executor ─────────────────────────────────────────────────────
@@ -241,30 +419,55 @@ namespace Mesen.Debugger.AI
 		private string Execute(string name, JsonObject input)
 		{
 			try {
-				return name switch {
-					"get_disassembly" => DoGetDisassembly(input),
-					"read_memory" => DoReadMemory(input),
-					"get_cdl_data" => DoGetCdlData(input),
-					"get_labels" => DoGetLabels(),
-					"get_label_at" => DoGetLabelAt(input),
-					"set_label" => DoSetLabel(input),
-					"set_labels" => DoSetLabels(input),
-					"delete_label" => DoDeleteLabel(input),
-					"get_call_stack" => DoGetCallStack(),
-					"get_annotation_summary" => DoGetAnnotationSummary(),
-					"add_to_review_queue"  => DoAddToReviewQueue(input),
-					"get_rom_map"          => DoGetRomMap(input),
-					"pause_emulation"      => DoPauseEmulation(),
-					"resume_emulation"     => DoResumeEmulation(),
-					"reset_game"           => DoResetGame(input),
-					"list_breakpoints"     => DoListBreakpoints(),
-					"set_breakpoint"       => DoSetBreakpoint(input),
-					"remove_breakpoint"    => DoRemoveBreakpoint(input),
-					"write_memory"         => DoWriteMemory(input),
-					"get_cpu_state"        => DoGetCpuState(),
-					"set_cpu_registers"    => DoSetCpuRegisters(input),
+				string result = name switch {
+					"get_disassembly"         => DoGetDisassembly(input),
+					"read_memory"             => DoReadMemory(input),
+					"get_cdl_data"            => DoGetCdlData(input),
+					"get_labels"              => DoGetLabels(),
+					"get_label_at"            => DoGetLabelAt(input),
+					"set_label"               => DoSetLabel(input),
+					"set_labels"              => DoSetLabels(input),
+					"delete_label"            => DoDeleteLabel(input),
+					"get_call_stack"          => DoGetCallStack(),
+					"get_annotation_summary"  => DoGetAnnotationSummary(),
+					"add_to_review_queue"     => DoAddToReviewQueue(input),
+					"get_rom_map"             => DoGetRomMap(input),
+					"pause_emulation"         => DoPauseEmulation(),
+					"resume_emulation"        => DoResumeEmulation(),
+					"reset_game"              => DoResetGame(input),
+					"list_breakpoints"        => DoListBreakpoints(),
+					"set_breakpoint"          => DoSetBreakpoint(input),
+					"remove_breakpoint"       => DoRemoveBreakpoint(input),
+					"write_memory"            => DoWriteMemory(input),
+					"get_cpu_state"           => DoGetCpuState(),
+					"set_cpu_registers"       => DoSetCpuRegisters(input),
+					"get_unlabeled_functions" => DoGetUnlabeledFunctions(input),
+					"get_cdl_functions_paged" => DoGetCdlFunctionsPaged(input),
+					"set_data_type"           => DoSetDataType(input),
+					// Stepping & run control
+					"step_into"          => DoStep(StepType.Step, 1),
+					"step_over"          => DoStep(StepType.StepOver, 1),
+					"step_out"           => DoStep(StepType.StepOut, 1),
+					"step_back"          => DoStep(StepType.StepBack, (int)StepBackType.Instruction),
+					"step_back_scanline" => DoStep(StepType.StepBack, (int)StepBackType.Scanline),
+					"step_back_frame"    => DoStep(StepType.StepBack, (int)StepBackType.Frame),
+					"run_cpu_cycle"      => DoStep(StepType.CpuCycleStep, 1),
+					"run_ppu_cycle"      => DoStep(StepType.PpuStep, 1),
+					"run_one_frame"      => DoStep(StepType.PpuFrame, 1),
+					"run_to_nmi"         => DoStep(StepType.RunToNmi, 1),
+					"run_to_irq"         => DoStep(StepType.RunToIrq, 1),
+					"run_to_scanline"    => DoRunToScanline(input),
+					"break_in"           => DoBreakIn(input),
+					// Watches
+					"add_watch"          => DoAddWatch(input),
+					"get_watches"        => DoGetWatches(),
+					"remove_watch"       => DoRemoveWatch(input),
 					_ => $"Unknown tool: {name}"
 				};
+				// Append current CPU state + PC disassembly to every response except get_cpu_state
+				// (which already IS the full CPU state). This lets the AI see execution context
+				// without an extra round-trip tool call.
+				return name == "get_cpu_state" ? result : result + GetContextBlock();
 			} catch(Exception ex) {
 				return $"Tool error: {ex.Message}";
 			}
@@ -355,18 +558,8 @@ namespace Mesen.Debugger.AI
 			var flags = DebugApi.GetCdlData((uint)romOffset, (uint)safeLen, _romMemType);
 			var sb = new StringBuilder();
 			sb.AppendLine($"ROM offset ${romOffset:X6}, {safeLen} bytes:");
-			for(int i = 0; i < flags.Length; i++) {
-				var f = flags[i];
-				var parts = new List<string>();
-				if((f & CdlFlags.Code) != 0) parts.Add("Code");
-				if((f & CdlFlags.Data) != 0) parts.Add("Data");
-				if((f & CdlFlags.JumpTarget) != 0) parts.Add("JumpTarget");
-				if((f & CdlFlags.SubEntryPoint) != 0) parts.Add("SubEntry");
-				if((f & CdlFlags.IndexMode8) != 0) parts.Add("X8");
-				if((f & CdlFlags.MemoryMode8) != 0) parts.Add("M8");
-				string flagStr = parts.Count > 0 ? string.Join("|", parts) : "None";
-				sb.AppendLine($"  +{i:X4} (offset ${romOffset + i:X6}): {flagStr}");
-			}
+			for(int i = 0; i < flags.Length; i++)
+				sb.AppendLine($"  +{i:X4} (offset ${romOffset + i:X6}): {FormatCdlFlags(flags[i])}");
 			return sb.ToString();
 		}
 
@@ -694,24 +887,30 @@ namespace Mesen.Debugger.AI
 		private static string DoSetBreakpoint(JsonObject input)
 		{
 			uint addr = ParseAddress(input["address"]?.GetValue<string>() ?? "0");
-			string breakOn = input["break_on"]?.GetValue<string>() ?? "exec";
-			string condition = input["condition"]?.GetValue<string>() ?? "";
+			string? endAddrStr = input["end_address"]?.GetValue<string>();
+			uint endAddr = endAddrStr != null ? ParseAddress(endAddrStr) : addr;
+			if(endAddr < addr) endAddr = addr;
+
+			string breakOn    = input["break_on"]?.GetValue<string>() ?? "exec";
+			string condition  = input["condition"]?.GetValue<string>() ?? "";
 			MemoryType memType = ParseMemoryType(input["memory_type"]?.GetValue<string>() ?? "cpu");
 
 			var bp = new Breakpoint {
 				StartAddress = addr,
-				EndAddress = addr,
-				MemoryType = memType,
-				CpuType = CpuType.Snes,
-				Enabled = true,
+				EndAddress   = endAddr,
+				MemoryType   = memType,
+				CpuType      = CpuType.Snes,
+				Enabled      = true,
 				BreakOnExec  = breakOn is "exec" or "all",
 				BreakOnRead  = breakOn is "read" or "read_write" or "all",
 				BreakOnWrite = breakOn is "write" or "read_write" or "all",
-				Condition = condition
+				Condition    = condition
 			};
 
 			BreakpointManager.AddBreakpoint(bp);
-			return $"Breakpoint set at ${addr:X6} ({memType}, {breakOn}).";
+			string range = addr == endAddr ? $"${addr:X6}" : $"${addr:X6}–${endAddr:X6}";
+			string cond  = condition.Length > 0 ? $" when ({condition})" : "";
+			return $"Breakpoint set: {range} [{memType}, {breakOn}]{cond}.";
 		}
 
 		private static string DoRemoveBreakpoint(JsonObject input)
@@ -797,6 +996,324 @@ namespace Mesen.Debugger.AI
 			if(changed.Count == 0) return "No register fields provided — nothing changed.";
 			DebugApi.SetCpuState(s, CpuType.Snes);
 			return $"CPU registers updated: {string.Join(", ", changed)}.";
+		}
+
+		// ── Stepping & run control implementations ───────────────────────────
+
+		private string DoStep(StepType type, int count)
+		{
+			if(DebugApi.GetMemorySize(_romMemType) <= 0) return "No ROM loaded.";
+			// PPU step types must target the console's main CPU (important for SA-1/SPC sub-CPUs).
+			CpuType target = type is StepType.PpuStep or StepType.PpuScanline or StepType.PpuFrame
+				? _cpu.GetConsoleType().GetMainCpuType()
+				: _cpu;
+			DebugApi.Step(target, count, type);
+			string label = type switch {
+				StepType.Step         => "Step into",
+				StepType.StepOver     => "Step over",
+				StepType.StepOut      => "Step out",
+				StepType.StepBack     => count switch {
+					(int)StepBackType.Instruction => "Step back (instruction)",
+					(int)StepBackType.Scanline    => "Step back (scanline)",
+					(int)StepBackType.Frame       => "Step back (frame)",
+					_                             => "Step back"
+				},
+				StepType.CpuCycleStep => "Run CPU cycle",
+				StepType.PpuStep      => "Run PPU cycle",
+				StepType.PpuFrame     => "Run one frame",
+				StepType.RunToNmi     => "Run to NMI",
+				StepType.RunToIrq     => "Run to IRQ",
+				_ => type.ToString()
+			};
+			return $"{label} executed. Waiting for emulator to pause…";
+		}
+
+		private string DoRunToScanline(JsonObject input)
+		{
+			if(DebugApi.GetMemorySize(_romMemType) <= 0) return "No ROM loaded.";
+			int scanline = Math.Clamp(input["scanline"]?.GetValue<int>() ?? 0, 0, 999);
+			DebugApi.Step(_cpu.GetConsoleType().GetMainCpuType(), scanline, StepType.SpecificScanline);
+			return $"Running to scanline {scanline}…";
+		}
+
+		private string DoBreakIn(JsonObject input)
+		{
+			if(DebugApi.GetMemorySize(_romMemType) <= 0) return "No ROM loaded.";
+			int count = Math.Max(1, input["count"]?.GetValue<int>() ?? 1);
+			string typeStr = input["type"]?.GetValue<string>() ?? "instruction";
+			StepType stepType = typeStr switch {
+				"cpu_cycle"    => StepType.CpuCycleStep,
+				"ppu_cycle"    => StepType.PpuStep,
+				"ppu_scanline" => StepType.PpuScanline,
+				"ppu_frame"    => StepType.PpuFrame,
+				_              => StepType.Step
+			};
+			CpuType target = stepType is StepType.PpuStep or StepType.PpuScanline or StepType.PpuFrame
+				? _cpu.GetConsoleType().GetMainCpuType()
+				: _cpu;
+			DebugApi.Step(target, count, stepType);
+			return $"Break in: advancing {count} × {typeStr}…";
+		}
+
+		// ── Watch implementations ─────────────────────────────────────────────
+
+		private string DoAddWatch(JsonObject input)
+		{
+			var arr = input["expressions"]?.AsArray();
+			if(arr == null || arr.Count == 0) return "No expressions provided.";
+
+			var manager = WatchManager.GetWatchManager(_cpu);
+			var added = new List<string>();
+			foreach(var node in arr) {
+				string expr = node?.GetValue<string>() ?? "";
+				if(expr.Length == 0) continue;
+				manager.AddWatch(expr);
+				added.Add(expr);
+			}
+			return added.Count == 0
+				? "No valid expressions provided."
+				: $"Added {added.Count} watch(es): {string.Join(", ", added.Select(e => $"'{e}'"))}.";
+		}
+
+		private string DoGetWatches()
+		{
+			var manager = WatchManager.GetWatchManager(_cpu);
+			var entries = manager.WatchEntries;
+			if(entries.Count == 0) return "No watches defined. Use add_watch to add expressions.";
+
+			// Evaluate current values
+			var values = manager.GetWatchContent(new List<WatchValueInfo>());
+			var sb = new StringBuilder();
+			sb.AppendLine($"{entries.Count} watch(es):");
+			for(int i = 0; i < entries.Count; i++) {
+				string val = i < values.Count ? values[i].Value : "?";
+				sb.AppendLine($"  [{i}]  {entries[i]}  =  {val}");
+			}
+			return sb.ToString();
+		}
+
+		private string DoRemoveWatch(JsonObject input)
+		{
+			var arr = input["indexes"]?.AsArray();
+			if(arr == null || arr.Count == 0) return "No indexes provided.";
+
+			var manager = WatchManager.GetWatchManager(_cpu);
+			int total = manager.WatchEntries.Count;
+			var indexes = arr.Select(n => n?.GetValue<int>() ?? -1).Where(i => i >= 0 && i < total).ToArray();
+			if(indexes.Length == 0) return $"No valid indexes (current watch count: {total}).";
+
+			manager.RemoveWatch(indexes);
+			return $"Removed {indexes.Length} watch(es) at index(es): {string.Join(", ", indexes)}.";
+		}
+
+		// ── New CDL / annotation tools ────────────────────────────────────────
+
+		private string DoGetUnlabeledFunctions(JsonObject input)
+		{
+			int romSize = DebugApi.GetMemorySize(_romMemType);
+			if(romSize <= 0) return "No ROM loaded.";
+
+			string filter   = input["filter"]?.GetValue<string>() ?? "either";
+			string? bankStr = input["bank"]?.GetValue<string>()?.TrimStart('$');
+			int? filterBank = bankStr != null ? Convert.ToInt32(bankStr, 16) : (int?)null;
+			int maxResults  = Math.Clamp(input["max_results"]?.GetValue<int>() ?? 200, 1, 1000);
+
+			var functions = DebugApi.GetCdlFunctions(_romMemType);
+			var cdl = DebugApi.GetCdlData(0, (uint)romSize, _romMemType);
+
+			var sb = new StringBuilder();
+			int count = 0;
+
+			foreach(var romOffset in functions) {
+				if(count >= maxResults) break;
+
+				var rel = DebugApi.GetRelativeAddress(new AddressInfo { Address = (int)romOffset, Type = _romMemType }, _cpu);
+				if(rel.Address < 0) continue;
+				uint snesAddr = (uint)rel.Address;
+
+				if(filterBank.HasValue && (snesAddr >> 16) != (uint)filterBank.Value) continue;
+
+				var lbl    = LabelManager.GetLabel(new AddressInfo { Address = (int)romOffset, Type = _romMemType });
+				string name    = lbl?.Label   ?? "";
+				string comment = lbl?.Comment ?? "";
+
+				bool noLabel   = string.IsNullOrEmpty(name);
+				bool noComment = string.IsNullOrEmpty(comment);
+				bool include   = filter switch {
+					"no_label"   => noLabel,
+					"no_comment" => noComment,
+					"both"       => noLabel && noComment,
+					_            => noLabel || noComment  // "either" (default)
+				};
+				if(!include) continue;
+
+				CdlFlags flags = romOffset < (uint)cdl.Length ? cdl[romOffset] : CdlFlags.None;
+				sb.AppendLine($"  ${snesAddr:X6}  ROM+${romOffset:X6}  [{FormatCdlFlags(flags)}]  label='{name}'  comment='{comment}'");
+				count++;
+			}
+
+			string header = $"Functions matching filter='{filter}'" +
+			                (filterBank.HasValue ? $" bank=${filterBank:X2}" : "") +
+			                $": {count} of {functions.Length} total CDL functions shown" +
+			                (count >= maxResults ? $" (capped at {maxResults}; use max_results to increase)" : "") +
+			                "\n";
+			return header + (count == 0 ? "  (none match filter)" : sb.ToString());
+		}
+
+		private string DoGetCdlFunctionsPaged(JsonObject input)
+		{
+			int romSize = DebugApi.GetMemorySize(_romMemType);
+			if(romSize <= 0) return "No ROM loaded.";
+
+			string? bankRaw = input["bank"]?.GetValue<string>()?.TrimStart('$');
+			if(string.IsNullOrEmpty(bankRaw)) return "Error: 'bank' parameter is required (e.g. \"$80\").";
+			int filterBank = Convert.ToInt32(bankRaw, 16);
+
+			int page     = Math.Max(0, input["page"]?.GetValue<int>() ?? 0);
+			int pageSize = Math.Clamp(input["page_size"]?.GetValue<int>() ?? 50, 1, 200);
+			string filter = input["filter"]?.GetValue<string>() ?? "all";
+
+			var functions = DebugApi.GetCdlFunctions(_romMemType);
+			var cdl = DebugApi.GetCdlData(0, (uint)romSize, _romMemType);
+
+			var entries = new List<(uint romOffset, uint snesAddr, CdlFlags flags, string name, string comment)>();
+			foreach(var romOffset in functions) {
+				var rel = DebugApi.GetRelativeAddress(new AddressInfo { Address = (int)romOffset, Type = _romMemType }, _cpu);
+				if(rel.Address < 0) continue;
+				uint snesAddr = (uint)rel.Address;
+				if((snesAddr >> 16) != (uint)filterBank) continue;
+
+				var lbl    = LabelManager.GetLabel(new AddressInfo { Address = (int)romOffset, Type = _romMemType });
+				string name    = lbl?.Label   ?? "";
+				string comment = lbl?.Comment ?? "";
+
+				bool noLabel   = string.IsNullOrEmpty(name);
+				bool noComment = string.IsNullOrEmpty(comment);
+				bool include   = filter switch {
+					"no_label"    => noLabel,
+					"no_comment"  => noComment,
+					"unannotated" => noLabel && noComment,
+					"labeled"     => !noLabel,
+					_             => true  // "all"
+				};
+				if(!include) continue;
+
+				CdlFlags flags = romOffset < (uint)cdl.Length ? cdl[romOffset] : CdlFlags.None;
+				entries.Add((romOffset, snesAddr, flags, name, comment));
+			}
+
+			int totalFiltered = entries.Count;
+			int totalPages    = totalFiltered == 0 ? 1 : (totalFiltered + pageSize - 1) / pageSize;
+			int startIdx      = page * pageSize;
+			var pageEntries   = entries.Skip(startIdx).Take(pageSize).ToList();
+
+			var sb = new StringBuilder();
+			sb.AppendLine($"Bank ${filterBank:X2} CDL functions (filter='{filter}'): {totalFiltered} entries, " +
+			              $"page {page} of {totalPages - 1}, showing {pageEntries.Count}");
+			sb.AppendLine();
+
+			if(pageEntries.Count == 0) {
+				sb.AppendLine("  (no entries on this page)");
+			} else {
+				foreach(var (romOffset, snesAddr, flags, name, comment) in pageEntries) {
+					string commentStr = comment.Length > 0 ? $"  ; {comment}" : "";
+					sb.AppendLine($"  ${snesAddr:X6}  ROM+${romOffset:X6}  [{FormatCdlFlags(flags)}]  {name}{commentStr}");
+				}
+			}
+
+			if(totalPages > 1) {
+				sb.AppendLine();
+				if(page < totalPages - 1)
+					sb.AppendLine($"[Next page: use page={page + 1}]");
+				else
+					sb.AppendLine("[Last page]");
+			}
+
+			return sb.ToString();
+		}
+
+		private string DoSetDataType(JsonObject input)
+		{
+			int romSize = DebugApi.GetMemorySize(_romMemType);
+			if(romSize <= 0) return "No ROM loaded.";
+
+			uint addr   = ParseAddress(input["address"]?.GetValue<string>() ?? "0");
+			int  length = Math.Clamp(input["length"]?.GetValue<int>() ?? 1, 1, 65536);
+			string type = (input["type"]?.GetValue<string>() ?? "none").ToLowerInvariant();
+
+			var absAddr = DebugApi.GetAbsoluteAddress(new AddressInfo { Address = (int)addr, Type = _cpuMemType });
+			if(absAddr.Type == MemoryType.None || absAddr.Address < 0)
+				return $"Error: address ${addr:X6} does not map to ROM.";
+
+			CdlFlags flags = type switch {
+				"code"        => CdlFlags.Code,
+				"data"        => CdlFlags.Data,
+				"jump_target" => CdlFlags.JumpTarget,
+				"sub_entry"   => CdlFlags.SubEntryPoint,
+				"none"        => CdlFlags.None,
+				_ => throw new ArgumentException($"Unknown type '{type}'. Valid: code, data, jump_target, sub_entry, none.")
+			};
+
+			uint start = (uint)absAddr.Address;
+			uint end   = (uint)Math.Min(absAddr.Address + length - 1, romSize - 1);
+
+			DebugApi.MarkBytesAs(_romMemType, start, end, flags);
+			return $"Marked ${addr:X6} (ROM ${start:X6}–${end:X6}, {end - start + 1} bytes) as '{type}'.";
+		}
+
+		// ── Context block (CPU state + PC disassembly) ────────────────────────
+		// Appended to every tool response so the AI never needs a separate
+		// get_cpu_state or get_disassembly call just to see where execution is.
+
+		private string GetContextBlock()
+		{
+			if(DebugApi.GetMemorySize(_romMemType) <= 0) return "";
+
+			var s  = DebugApi.GetCpuState<SnesCpuState>(CpuType.Snes);
+			var f  = s.PS;
+			bool n  = (f & SnesCpuFlags.Negative)   != 0;
+			bool v  = (f & SnesCpuFlags.Overflow)    != 0;
+			bool m  = (f & SnesCpuFlags.MemoryMode8) != 0;
+			bool xi = (f & SnesCpuFlags.IndexMode8)  != 0;
+			bool dl = (f & SnesCpuFlags.Decimal)     != 0;
+			bool ii = (f & SnesCpuFlags.IrqDisable)  != 0;
+			bool z  = (f & SnesCpuFlags.Zero)        != 0;
+			bool c  = (f & SnesCpuFlags.Carry)       != 0;
+
+			bool paused = EmuApi.IsPaused();
+			var sb = new StringBuilder();
+			sb.AppendLine();
+			sb.AppendLine($"--- CPU State ({(paused ? "paused" : "running snapshot")}) ---");
+			sb.AppendLine($"PC=${s.K:X2}:{s.PC:X4}  A=${s.A:X4}  X=${s.X:X4}  Y=${s.Y:X4}  SP=${s.SP:X4}  D=${s.D:X4}  DBR=${s.DBR:X2}");
+			sb.AppendLine($"PS=${( byte)f:X2}  N={n.B()} V={v.B()} M={m.B()} X={xi.B()} D={dl.B()} I={ii.B()} Z={z.B()} C={c.B()}  Mode={(s.EmulationMode ? "Emulation" : "Native")}");
+
+			uint pcAddr = ((uint)s.K << 16) | s.PC;
+			var rows = DebugApi.GetDisassemblyOutput(_cpu, pcAddr, 6);
+			if(rows.Length > 0) {
+				sb.AppendLine("Disasm at PC:");
+				foreach(var row in rows) {
+					string marker  = (row.Address >= 0 && (uint)row.Address == pcAddr) ? "▶" : " ";
+					string addrStr = row.Address >= 0 ? $"${row.Address:X6}" : "      ";
+					string cmt     = row.Comment.Length > 0 ? $"  ; {row.Comment}" : "";
+					sb.AppendLine($"  {marker}{addrStr}  {row.Text.PadRight(24)}{cmt}");
+				}
+			}
+
+			return sb.ToString();
+		}
+
+		// ── Shared CDL flag formatter ─────────────────────────────────────────
+
+		private static string FormatCdlFlags(CdlFlags f)
+		{
+			var parts = new List<string>();
+			if((f & CdlFlags.Code)          != 0) parts.Add("Code");
+			if((f & CdlFlags.Data)          != 0) parts.Add("Data");
+			if((f & CdlFlags.JumpTarget)    != 0) parts.Add("JumpTarget");
+			if((f & CdlFlags.SubEntryPoint) != 0) parts.Add("SubEntry");
+			if((f & CdlFlags.IndexMode8)    != 0) parts.Add("X8");
+			if((f & CdlFlags.MemoryMode8)   != 0) parts.Add("M8");
+			return parts.Count > 0 ? string.Join("|", parts) : "None";
 		}
 
 		// ── Helpers ───────────────────────────────────────────────────────────

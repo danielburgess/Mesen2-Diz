@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Mesen.Debugger.ViewModels;
 using Mesen.Utilities;
@@ -16,6 +17,11 @@ namespace Mesen.Debugger.Views
 		public AiChatView()
 		{
 			InitializeComponent();
+
+			// Register with Tunnel routing so we intercept Enter BEFORE the TextBox's
+			// internal AcceptsReturn handler inserts a newline character.
+			var txtInput = this.FindControl<TextBox>("txtInput")!;
+			txtInput.AddHandler(InputElement.KeyDownEvent, OnInputKeyDown, RoutingStrategies.Tunnel);
 		}
 
 		private void InitializeComponent()

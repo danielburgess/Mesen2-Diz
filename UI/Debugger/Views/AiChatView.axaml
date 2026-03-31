@@ -87,15 +87,14 @@
 				<TextBox Grid.Column="0"
 					x:Name="txtInput"
 					Text="{Binding InputText}"
-					Watermark="Ask Claude... (Enter to send, Shift+Enter for newline)"
+					Watermark="{Binding InputWatermark}"
 					AcceptsReturn="True"
 					TextWrapping="Wrap"
 					MinHeight="28"
-					MaxHeight="100"
+					MaxHeight="84"
 					ScrollViewer.VerticalScrollBarVisibility="Auto"
 					FontSize="12"
-					VerticalContentAlignment="Center"
-					KeyDown="OnInputKeyDown" />
+					VerticalContentAlignment="Top" />
 				<Button Grid.Column="1" Margin="4,0,0,0" Padding="10,4"
 					VerticalAlignment="Bottom"
 					Click="OnSendCancelClick">
@@ -145,6 +144,7 @@
 										IsVisible="{Binding IsStreaming, Converter={x:Static BoolConverters.Not}}"
 										Markdown="{Binding Text}"
 										MarkdownStyleName="GithubLike"
+										SelectionEnabled = "true"
 										HorizontalAlignment="Stretch" />
 								</StackPanel>
 							</Border>
