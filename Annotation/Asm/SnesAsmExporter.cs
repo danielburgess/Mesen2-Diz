@@ -117,8 +117,22 @@ public static class SnesAsmExporter
 
             int size;
             if (ann.Type == ByteType.Opcode)
-                size = EmitInstruction(sb, romBytes, i, snesAddr, ann, inlineComment,
-                                       allLabelsByOffset, map);
+            {
+                // Guard: if the instruction would cross the 16-bit page boundary
+                // (65816 PC wraps within the bank), asar would report
+                // Ebank_border_crossed.  Emit the opcode as a raw db byte instead
+                // and let the main loop handle the operand bytes on the next pass.
+                int numOpsAhead = OperandBytes(Table[romBytes[i]].Mode, ann.MFlag, ann.XFlag);
+                bool crossesBankBoundary = (snesAddr & 0xFFFF) + 1 + numOpsAhead > 0x10000;
+                if (crossesBankBoundary)
+                {
+                    sb.AppendLine($"        db ${romBytes[i]:X2}");
+                    size = 1;
+                }
+                else
+                    size = EmitInstruction(sb, romBytes, i, snesAddr, ann, inlineComment,
+                                           allLabelsByOffset, map);
+            }
             else if (ann.Type == ByteType.Unreached || ann.Type == ByteType.Operand)
             {
                 // Emit every byte including unreached and stray operand bytes.
@@ -518,6 +532,58 @@ public static class SnesAsmExporter
         return (synthLabels, looseLabels);
     }
 
+    // ── Public branch-target discovery ───────────────────────────────────────
+
+    /// <summary>
+    /// Returns all BRA/BRL branch targets whose ROM offset has no entry in
+    /// <paramref name="existingByRomOffset"/>. Each result is
+    /// (romOffset, canonicalSnesAddr, syntheticName) where syntheticName is
+    /// the CODE_XXXXXX label the exporter would generate for that target.
+    /// Duplicate targets are returned only once.
+    /// </summary>
+    public static List<(int romOffset, int snesAddr, string name)> FindUnlabeledBranchTargets(
+        RomAnnotationStore store,
+        byte[] romBytes,
+        Dictionary<int, string>? existingByRomOffset = null)
+    {
+        existingByRomOffset ??= new Dictionary<int, string>();
+        int romLen = romBytes.Length;
+        RomMapMode map = store.MapMode;
+        var result = new List<(int, int, string)>();
+        var seen   = new HashSet<int>();
+
+        for (int i = 0; i < romLen; i++)
+        {
+            if (store.Bytes[i].Type != ByteType.Opcode) continue;
+            if (!SnesAddressConverter.TryToSnesAddress(i, romLen, map, out int snesAddr)) continue;
+
+            var info = Table[romBytes[i]];
+            int targetSnes;
+            if (info.Mode == AddrMode.Rel8)
+            {
+                if (i + 1 >= romLen) continue;
+                targetSnes = (snesAddr & 0xFF0000) | ((snesAddr + 2 + (sbyte)romBytes[i + 1]) & 0xFFFF);
+            }
+            else if (info.Mode == AddrMode.Rel16)
+            {
+                if (romBytes[i] == 0x62) continue; // PER — literal offset, no label needed
+                if (i + 2 >= romLen) continue;
+                int w = romBytes[i + 1] | (romBytes[i + 2] << 8);
+                targetSnes = (snesAddr & 0xFF0000) | ((snesAddr + 3 + (short)w) & 0xFFFF);
+            }
+            else continue;
+
+            if (!SnesAddressConverter.TryToRomOffset(targetSnes, map, out int targetOffset)) continue;
+            if (targetOffset >= romLen) continue;
+            if (existingByRomOffset.ContainsKey(targetOffset)) continue;
+            if (!seen.Add(targetOffset)) continue;
+
+            if (SnesAddressConverter.TryToSnesAddress(targetOffset, romLen, map, out int canonSnes))
+                result.Add((targetOffset, canonSnes, $"CODE_{AsmSnesAddr(canonSnes, map):X6}"));
+        }
+        return result;
+    }
+
     private static Dictionary<int, string> BuildOffsetDict(
         IReadOnlyDictionary<int, string> byAddr,
         RomMapMode map)
@@ -682,6 +748,16 @@ public static class SnesAsmExporter
         (ops.Length > 0 ? ops[0] : 0)        |
         (ops.Length > 1 ? ops[1] << 8  : 0)  |
         (ops.Length > 2 ? ops[2] << 16 : 0);
+
+    // ── Public helpers ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns the number of operand bytes for the given opcode, given the
+    /// current M (memory-width) and X (index-width) flags. Used by callers
+    /// that need to walk the instruction stream without importing private types.
+    /// </summary>
+    public static int GetOperandByteCount(byte opcode, bool m, bool x) =>
+        OperandBytes(Table[opcode].Mode, m, x);
 
     // ── Operand byte counts by addressing mode ────────────────────────────────
 

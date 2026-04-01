@@ -116,7 +116,7 @@ namespace Mesen.Debugger.AI
 						["content"] = new JsonArray {
 							(JsonNode)new JsonObject {
 								["type"] = "text",
-								["text"] = $"[System: the tool call limit of {maxToolCallsPerTurn} for this turn has been reached. Stop using tools now. Summarize what you have done and what still needs to be done. If you need the user to take an action first (such as running the game to a specific point so the code is reachable), say so explicitly and wait for their reply.]"
+								["text"] = $"[System: the tool call limit of {maxToolCallsPerTurn} for this turn has been reached. Output exactly this message and nothing else: \"Tool limit reached. If you wish to continue, say continue.\"]"
 							}
 						}
 					});
@@ -203,62 +203,71 @@ namespace Mesen.Debugger.AI
 			using var reader = new StreamReader(stream);
 
 			string? line;
-			while((line = await reader.ReadLineAsync()) != null) {
-				ct.ThrowIfCancellationRequested();
-				if(!line.StartsWith("data: ")) continue;
-				var data = line.Substring(6).Trim();
-				if(data == "[DONE]") break;
+			try {
+				while((line = await reader.ReadLineAsync()) != null) {
+					ct.ThrowIfCancellationRequested();
+					if(!line.StartsWith("data: ")) continue;
+					var data = line.Substring(6).Trim();
+					if(data == "[DONE]") break;
 
-				JsonDocument doc;
-				try { doc = JsonDocument.Parse(data); }
-				catch { continue; }
+					JsonDocument doc;
+					try { doc = JsonDocument.Parse(data); }
+					catch { continue; }
 
-				using(doc) {
-					var root = doc.RootElement;
-					if(!root.TryGetProperty("type", out var typeProp)) continue;
-					string evtType = typeProp.GetString() ?? "";
+					using(doc) {
+						var root = doc.RootElement;
+						if(!root.TryGetProperty("type", out var typeProp)) continue;
+						string evtType = typeProp.GetString() ?? "";
 
-					switch(evtType) {
-						case "content_block_start":
-							if(root.TryGetProperty("content_block", out var cb) &&
-								root.TryGetProperty("index", out var idxProp)) {
-								int idx = idxProp.GetInt32();
-								string cbType = cb.GetProperty("type").GetString() ?? "";
-								if(cbType == "tool_use") {
-									toolUses[idx] = new ToolUseAccum {
-										Id = cb.GetProperty("id").GetString() ?? "",
-										Name = cb.GetProperty("name").GetString() ?? "",
-										// Preserve the whole block for assistant history
-										ContentBlock = JsonNode.Parse(cb.GetRawText()) as JsonObject
-											?? new JsonObject()
-									};
+						switch(evtType) {
+							case "content_block_start":
+								if(root.TryGetProperty("content_block", out var cb) &&
+									root.TryGetProperty("index", out var idxProp)) {
+									int idx = idxProp.GetInt32();
+									string cbType = cb.GetProperty("type").GetString() ?? "";
+									if(cbType == "tool_use") {
+										toolUses[idx] = new ToolUseAccum {
+											Id = cb.GetProperty("id").GetString() ?? "",
+											Name = cb.GetProperty("name").GetString() ?? "",
+											// Preserve the whole block for assistant history
+											ContentBlock = JsonNode.Parse(cb.GetRawText()) as JsonObject
+												?? new JsonObject()
+										};
+									}
 								}
-							}
-							break;
+								break;
 
-						case "content_block_delta":
-							if(root.TryGetProperty("delta", out var delta) &&
-								root.TryGetProperty("index", out var dIdx)) {
-								int idx = dIdx.GetInt32();
-								string deltaType = delta.GetProperty("type").GetString() ?? "";
-								if(deltaType == "text_delta") {
-									string text = delta.GetProperty("text").GetString() ?? "";
-									textParts.Add(text);
-									onTextDelta(text);
-								} else if(deltaType == "input_json_delta" && toolUses.TryGetValue(idx, out var tu)) {
-									tu.InputJson.Append(delta.GetProperty("partial_json").GetString() ?? "");
+							case "content_block_delta":
+								if(root.TryGetProperty("delta", out var delta) &&
+									root.TryGetProperty("index", out var dIdx)) {
+									int idx = dIdx.GetInt32();
+									string deltaType = delta.GetProperty("type").GetString() ?? "";
+									if(deltaType == "text_delta") {
+										string text = delta.GetProperty("text").GetString() ?? "";
+										textParts.Add(text);
+										onTextDelta(text);
+									} else if(deltaType == "input_json_delta" && toolUses.TryGetValue(idx, out var tu)) {
+										tu.InputJson.Append(delta.GetProperty("partial_json").GetString() ?? "");
+									}
 								}
-							}
-							break;
+								break;
 
-						case "message_delta":
-							if(root.TryGetProperty("delta", out var msgDelta) &&
-								msgDelta.TryGetProperty("stop_reason", out var sr)) {
-								stopReason = sr.GetString() ?? "end_turn";
-							}
-							break;
+							case "message_delta":
+								if(root.TryGetProperty("delta", out var msgDelta) &&
+									msgDelta.TryGetProperty("stop_reason", out var sr)) {
+									stopReason = sr.GetString() ?? "end_turn";
+								}
+								break;
+						}
 					}
 				}
+			} catch(System.IO.IOException) {
+				// Network stream dropped mid-response — treat whatever was received as end_turn.
+				// Discard any partial tool-use accumulations (their JSON is incomplete and unusable).
+				toolUses.Clear();
+				string notice = "\n\n[Stream interrupted — response may be incomplete]";
+				textParts.Add(notice);
+				onTextDelta(notice);
 			}
 
 			// Parse accumulated tool inputs

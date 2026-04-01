@@ -100,7 +100,7 @@ namespace Mesen.Debugger.AI
 						["content"] = new JsonArray {
 							(JsonNode)new JsonObject {
 								["type"] = "text",
-								["text"] = $"[System: the tool call limit of {maxToolCallsPerTurn} for this turn has been reached. Stop using tools now. Summarize what you have done and what still needs to be done.]"
+								["text"] = $"[System: the tool call limit of {maxToolCallsPerTurn} for this turn has been reached. Output exactly this message and nothing else: \"Tool limit reached. If you wish to continue, say continue.\"]"
 							}
 						}
 					});
@@ -265,6 +265,8 @@ namespace Mesen.Debugger.AI
 				using var reader = new StreamReader(stream);
 
 				string? line;
+				bool streamInterrupted = false;
+				try {
 				while((line = await reader.ReadLineAsync()) != null) {
 					ct.ThrowIfCancellationRequested();
 					if(!line.StartsWith("data: ")) continue;
@@ -318,6 +320,18 @@ namespace Mesen.Debugger.AI
 							}
 						}
 					}
+				}
+				} catch(System.IO.IOException) {
+					// Network stream dropped mid-response — treat whatever was received as end_turn.
+					// Discard any partial tool-call accumulations (their JSON is incomplete and unusable).
+					toolCalls.Clear();
+					streamInterrupted = true;
+				}
+
+				if(streamInterrupted) {
+					string notice = "\n\n[Stream interrupted — response may be incomplete]";
+					textParts.Add(notice);
+					onTextDelta(notice);
 				}
 
 				// Parse accumulated tool inputs

@@ -185,12 +185,13 @@
 								CornerRadius="6" Padding="8,5"
 								HorizontalAlignment="Left" MaxWidth="560">
 								<StackPanel>
-									<!-- Streaming: plain text with cursor -->
+									<!-- Streaming: plain text with animated ellipsis indicator -->
 									<SelectableTextBlock IsVisible="{Binding IsStreaming}"
 										Text="{Binding Text}"
 										TextWrapping="Wrap" FontSize="12" />
 									<TextBlock IsVisible="{Binding IsStreaming}"
-										Text="▌" FontSize="12" Opacity="0.5" />
+										Text="{Binding StreamingIndicator}"
+										FontSize="12" Opacity="0.6" />
 
 									<!-- Completed: rendered markdown -->
 									<md:MarkdownScrollViewer

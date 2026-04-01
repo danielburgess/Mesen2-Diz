@@ -96,8 +96,13 @@ namespace Mesen.Debugger.AI
 				}, new[] { "rom_offset", "length" })),
 
 			Tool("get_labels",
-				"Get all current labels as a list of {address, memory_type, name, comment} objects.",
-				new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() }),
+				"Get current labels. Optionally filter by name substring, prefix, and/or SNES CPU address range. All filters are combined (AND). Returns address, memory_type, name, and comment for each match.",
+				Schema("", new() {
+					["filter"]      = Prop("string", "Optional substring to match against label names (case-insensitive)."),
+					["prefix"]      = Prop("string", "Optional prefix to match against label names (case-insensitive)."),
+					["addr_from"]   = Prop("string", "Optional start of SNES CPU address range (hex, inclusive)."),
+					["addr_to"]     = Prop("string", "Optional end of SNES CPU address range (hex, inclusive).")
+				}, new string[0])),
 
 			Tool("get_label_at",
 				"Get the label and comment at a specific SNES CPU address, if any.",
@@ -430,7 +435,7 @@ namespace Mesen.Debugger.AI
 					"get_disassembly"         => DoGetDisassembly(input),
 					"read_memory"             => DoReadMemory(input),
 					"get_cdl_data"            => DoGetCdlData(input),
-					"get_labels"              => DoGetLabels(),
+					"get_labels"              => DoGetLabels(input),
 					"get_label_at"            => DoGetLabelAt(input),
 					"set_label"               => DoSetLabel(input),
 					"set_labels"              => DoSetLabels(input),
@@ -570,14 +575,36 @@ namespace Mesen.Debugger.AI
 			return sb.ToString();
 		}
 
-		private string DoGetLabels()
+		private string DoGetLabels(JsonObject input)
 		{
+			string filter   = input["filter"]?.GetValue<string>()   ?? "";
+			string prefix   = input["prefix"]?.GetValue<string>()   ?? "";
+			string addrFrom = input["addr_from"]?.GetValue<string>() ?? "";
+			string addrTo   = input["addr_to"]?.GetValue<string>()   ?? "";
+
 			var labels = LabelManager.GetAllLabels();
 			if(labels.Count == 0) return "No labels defined.";
 
+			IEnumerable<CodeLabel> filtered = labels;
+			if(filter.Length > 0)
+				filtered = filtered.Where(l => l.Label.Contains(filter, StringComparison.OrdinalIgnoreCase));
+			if(prefix.Length > 0)
+				filtered = filtered.Where(l => l.Label.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+			if(addrFrom.Length > 0) {
+				uint from = ParseAddress(addrFrom);
+				filtered = filtered.Where(l => l.Address >= from);
+			}
+			if(addrTo.Length > 0) {
+				uint to = ParseAddress(addrTo);
+				filtered = filtered.Where(l => l.Address <= to);
+			}
+
+			var matches = filtered.OrderBy(l => l.Address).ToList();
+			if(matches.Count == 0) return "No labels matched.";
+
 			var sb = new StringBuilder();
-			sb.AppendLine($"{labels.Count} label(s):");
-			foreach(var lbl in labels.OrderBy(l => l.Address)) {
+			sb.AppendLine($"{matches.Count} label(s):");
+			foreach(var lbl in matches) {
 				string comment = lbl.Comment.Length > 0 ? $"  ; {lbl.Comment}" : "";
 				sb.AppendLine($"  {lbl.MemoryType}:${lbl.Address:X6}  {lbl.Label}{comment}");
 			}
@@ -708,14 +735,23 @@ namespace Mesen.Debugger.AI
 
 			var stats = DebugApi.GetCdlStatistics(_romMemType);
 			var labels = LabelManager.GetAllLabels();
-			int romLabels = labels.Count(l => l.MemoryType == _romMemType);
+			int romLabels = labels.Count(l => {
+				if(l.MemoryType == _romMemType) return true;
+				var abs = DebugApi.GetAbsoluteAddress(new AddressInfo { Address = (int)l.Address, Type = l.MemoryType });
+				return abs.Type == _romMemType && abs.Address >= 0;
+			});
 
-			// Count unannotated CDL targets
+			// Count functions, jump targets, and unannotated entries in one CDL pass.
+			// GetCdlStatistics() leaves FunctionCount/JumpTargetCount == 0 for SNES
+			// (the base C++ implementation never fills them), so derive them ourselves.
 			var cdl = DebugApi.GetCdlData(0, (uint)romSize, _romMemType);
-			int unannotatedTargets = 0;
+			int jumpTargets = 0, functions = 0, unannotatedTargets = 0;
 			for(int i = 0; i < cdl.Length; i++) {
-				bool isTarget = (cdl[i] & (CdlFlags.JumpTarget | CdlFlags.SubEntryPoint)) != 0;
-				if(isTarget) {
+				bool isJump = (cdl[i] & CdlFlags.JumpTarget) != 0;
+				bool isSub  = (cdl[i] & CdlFlags.SubEntryPoint) != 0;
+				if(isJump) jumpTargets++;
+				if(isSub)  functions++;
+				if(isJump || isSub) {
 					var abs = new AddressInfo { Address = i, Type = _romMemType };
 					if(LabelManager.GetLabel(abs) == null) unannotatedTargets++;
 				}
@@ -726,7 +762,7 @@ namespace Mesen.Debugger.AI
 
 			return $"ROM size: {romSize:N0} bytes\n" +
 			       $"CDL coverage: {stats.CodeBytes:N0} code bytes ({codePct:F1}%), {stats.DataBytes:N0} data bytes ({dataPct:F1}%)\n" +
-			       $"CDL functions: {stats.FunctionCount:N0}  jump targets: {stats.JumpTargetCount:N0}\n" +
+			       $"CDL functions: {functions:N0}  jump targets: {jumpTargets:N0}\n" +
 			       $"Labels: {romLabels:N0} on ROM\n" +
 			       $"Unannotated CDL targets: {unannotatedTargets:N0}";
 		}
@@ -815,28 +851,46 @@ namespace Mesen.Debugger.AI
 
 			var sb = new StringBuilder();
 
-			// CDL stats
+			// CDL stats — FunctionCount/JumpTargetCount are never populated by the SNES
+			// CDL implementation (base C++ GetStatistics() leaves them 0), so count them
+			// from the raw CDL byte array instead.
 			var stats = DebugApi.GetCdlStatistics(_romMemType);
+			var cdlFull = DebugApi.GetCdlData(0, (uint)romSize, _romMemType);
+			int cdlFunctions = 0, cdlJumpTargets = 0;
+			foreach(var b in cdlFull) {
+				if((b & CdlFlags.SubEntryPoint) != 0) cdlFunctions++;
+				if((b & CdlFlags.JumpTarget) != 0) cdlJumpTargets++;
+			}
 			double codePct = romSize > 0 ? 100.0 * stats.CodeBytes / romSize : 0;
 			double dataPct = romSize > 0 ? 100.0 * stats.DataBytes / romSize : 0;
 			sb.AppendLine($"ROM size: {romSize:N0} bytes");
-			sb.AppendLine($"CDL coverage: {stats.CodeBytes:N0} code ({codePct:F1}%), {stats.DataBytes:N0} data ({dataPct:F1}%), {romSize - stats.CodeBytes - stats.DataBytes:N0} unreached ({100 - codePct - dataPct:F1}%)");
-			sb.AppendLine($"CDL functions: {stats.FunctionCount:N0}  jump targets: {stats.JumpTargetCount:N0}");
+			if(stats.CodeBytes == 0) {
+				sb.AppendLine($"CDL coverage: 0 code (0.0%), 0 data (0.0%) — NOTE: CDL is session-transient; 0% means the ROM has not been executed with the debugger active in this session, not that it has never been run. Re-run the game or load a saved CDL file to populate coverage.");
+			} else {
+				sb.AppendLine($"CDL coverage: {stats.CodeBytes:N0} code ({codePct:F1}%), {stats.DataBytes:N0} data ({dataPct:F1}%), {romSize - stats.CodeBytes - stats.DataBytes:N0} unreached ({100 - codePct - dataPct:F1}%)");
+			}
+			sb.AppendLine($"CDL functions: {cdlFunctions:N0}  jump targets: {cdlJumpTargets:N0}");
 
-			// Labels
-			var allLabels = LabelManager.GetAllLabels()
-				.Where(l => l.MemoryType == _romMemType)
-				.OrderBy(l => l.Address)
-				.ToList();
-
+			// Labels — accept any memory type; normalize to ROM offset for dedup/sort.
+			// Labels set via the Mesen2 UI use SnesMemory (CPU address space); labels set
+			// by the AI tool use SnesPrgRom (ROM offset).  Both are valid and must be shown.
+			var seenRomOffsets = new HashSet<int>();
 			var entries = new List<(uint romOffset, uint snesAddr, string name, string comment)>();
-			foreach(var lbl in allLabels) {
-				var rel = DebugApi.GetRelativeAddress(new AddressInfo { Address = (int)lbl.Address, Type = _romMemType }, _cpu);
+			foreach(var lbl in LabelManager.GetAllLabels()) {
+				// Resolve to absolute ROM address regardless of how the label was stored
+				AddressInfo abs = lbl.MemoryType == _romMemType
+					? new AddressInfo { Address = (int)lbl.Address, Type = _romMemType }
+					: DebugApi.GetAbsoluteAddress(new AddressInfo { Address = (int)lbl.Address, Type = lbl.MemoryType });
+				if(abs.Type != _romMemType || abs.Address < 0) continue;
+				if(!seenRomOffsets.Add(abs.Address)) continue;  // deduplicate
+
+				var rel = DebugApi.GetRelativeAddress(abs, _cpu);
 				if(rel.Address < 0) continue;
 				uint snesAddr = (uint)rel.Address;
 				if(filterBank.HasValue && (snesAddr >> 16) != (uint)filterBank.Value) continue;
-				entries.Add((lbl.Address, snesAddr, lbl.Label, lbl.Comment));
+				entries.Add(((uint)abs.Address, snesAddr, lbl.Label, lbl.Comment));
 			}
+			entries.Sort((a, b) => a.romOffset.CompareTo(b.romOffset));
 
 			sb.AppendLine();
 			sb.AppendLine($"=== Labels ({entries.Count}{(filterBank.HasValue ? $" in bank ${filterBank:X2}" : "")}) ===");

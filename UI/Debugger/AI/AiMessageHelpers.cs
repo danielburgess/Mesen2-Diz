@@ -62,19 +62,28 @@ namespace Mesen.Debugger.AI
 			}
 		}
 
-		// Conservative budget leaving room for system prompt + completion.
-		// Claude Sonnet/Opus is 131k; local models vary. 90k keeps us safely clear.
-		private const int TokenBudget = 90_000;
+		// Budget for message history tokens. Claude Sonnet/Opus limit is 131k total.
+		// System prompt (~8k) + tool definitions (~2k) + max completion (6k) ≈ 16k overhead.
+		// 60k leaves ~55k headroom — conservative enough to handle estimation error.
+		private const int TokenBudget = 60_000;
+
+		// Tool results larger than this are truncated in the API payload.
+		// _history keeps the full data; only what gets sent to the API is capped.
+		// 12k chars ≈ 3k tokens — enough for the AI to act on a result without
+		// a single tool call monopolising the entire context window.
+		private const int MaxToolResultChars = 12_000;
 
 		/// <summary>
 		/// Returns recent history trimmed to at most <paramref name="maxTurns"/> real user turns,
 		/// then further trimmed if the estimated token count still exceeds <see cref="TokenBudget"/>.
 		/// Never splits a tool_use/tool_result pair across the trim boundary.
 		/// Always preserves at least the most recent turn regardless of size.
+		/// Tool results that exceed <see cref="MaxToolResultChars"/> are truncated in the returned
+		/// slice; the originals in <paramref name="messages"/> are not modified.
 		/// </summary>
 		internal static List<JsonObject> TrimHistory(List<JsonObject> messages, int maxTurns)
 		{
-			if(maxTurns <= 0) return messages;
+			if(maxTurns <= 0) return TruncateToolResults(messages);
 
 			// Build the list of indexes where real user turns start (ignoring tool_result messages)
 			var turnStarts = new List<int>();
@@ -88,7 +97,7 @@ namespace Mesen.Debugger.AI
 				}
 			}
 
-			if(turnStarts.Count == 0) return messages;
+			if(turnStarts.Count == 0) return TruncateToolResults(messages);
 
 			// Start at the maxTurns boundary, then walk forward until under the token budget.
 			// The loop always stops at least one turn before the end, guaranteeing the most
@@ -98,24 +107,100 @@ namespace Mesen.Debugger.AI
 			while(keepFrom < turnStarts.Count - 1) {
 				var candidate = messages.GetRange(turnStarts[keepFrom], messages.Count - turnStarts[keepFrom]);
 				if(EstimateTokens(candidate) <= TokenBudget)
-					return candidate;
+					return TruncateToolResults(candidate);
 				keepFrom++;
 			}
 
-			// Last resort: return only the most recent turn
-			return messages.GetRange(turnStarts[turnStarts.Count - 1], messages.Count - turnStarts[turnStarts.Count - 1]);
+			// Last resort: return only the most recent turn (still truncated for safety)
+			return TruncateToolResults(
+				messages.GetRange(turnStarts[turnStarts.Count - 1], messages.Count - turnStarts[turnStarts.Count - 1]));
 		}
 
 		/// <summary>
-		/// Rough token estimate: serialize to JSON and divide by 4 (≈4 chars/token for mixed
-		/// English + code content). Intentionally over-estimates to stay conservative.
+		/// Returns a copy of <paramref name="messages"/> where any tool_result whose content
+		/// exceeds <see cref="MaxToolResultChars"/> is replaced with a truncated clone.
+		/// Messages that do not need truncation are returned by reference (no allocation).
+		/// </summary>
+		private static List<JsonObject> TruncateToolResults(List<JsonObject> messages)
+		{
+			List<JsonObject>? result = null;  // allocated lazily only if any truncation occurs
+
+			for(int i = 0; i < messages.Count; i++) {
+				var msg = messages[i];
+
+				// Only user messages can contain tool_result blocks
+				if(msg["role"]?.GetValue<string>() != "user" ||
+				   msg["content"] is not JsonArray content) {
+					result?.Add(msg);
+					continue;
+				}
+
+				// Scan for oversized tool_result blocks
+				bool needsTruncation = false;
+				foreach(var block in content) {
+					if(block is JsonObject b &&
+					   b["type"]?.GetValue<string>() == "tool_result" &&
+					   ToolResultString(b) is string s &&
+					   s.Length > MaxToolResultChars) {
+						needsTruncation = true;
+						break;
+					}
+				}
+
+				if(!needsTruncation) {
+					result?.Add(msg);
+					continue;
+				}
+
+				// Switch to explicit list on first truncation, back-filling previous entries
+				if(result == null) {
+					result = new List<JsonObject>(messages.Count);
+					for(int j = 0; j < i; j++) result.Add(messages[j]);
+				}
+
+				// Deep-clone this message and truncate oversized tool results within it
+				var cloned = (JsonObject)msg.DeepClone();
+				if(cloned["content"] is JsonArray clonedContent) {
+					foreach(var block in clonedContent) {
+						if(block is not JsonObject b) continue;
+						if(b["type"]?.GetValue<string>() != "tool_result") continue;
+						string? s = ToolResultString(b);
+						if(s != null && s.Length > MaxToolResultChars) {
+							int omitted = s.Length - MaxToolResultChars;
+							b["content"] =
+								$"[TRUNCATED: This tool result was cut from {s.Length:N0} to {MaxToolResultChars:N0} chars " +
+								$"({omitted:N0} chars / ~{omitted / 3:N0} tokens omitted) to fit the context window. " +
+								$"The data below is incomplete — do not assume the missing portion is absent from the ROM; " +
+								$"call the tool again with a narrower scope if you need the rest.]\n\n" +
+								s[..MaxToolResultChars];
+						}
+					}
+				}
+				result.Add(cloned);
+			}
+
+			return result ?? messages;
+		}
+
+		/// <summary>Extracts the string content from a tool_result block, or null if not a plain string.</summary>
+		private static string? ToolResultString(JsonObject b)
+		{
+			var node = b["content"];
+			if(node is JsonValue jv && jv.TryGetValue<string>(out var s)) return s;
+			return null;
+		}
+
+		/// <summary>
+		/// Token estimate: serialize to JSON and divide by 3.
+		/// Mixed English+code content is roughly 3 chars/token (more conservative than the
+		/// commonly cited 4, which is for plain prose).
 		/// </summary>
 		private static int EstimateTokens(List<JsonObject> messages)
 		{
 			int chars = 0;
 			foreach(var msg in messages)
 				chars += msg.ToJsonString().Length;
-			return chars / 4;
+			return chars / 3;
 		}
 
 		/// <summary>

@@ -837,10 +837,40 @@ namespace Mesen.Debugger.ViewModels
 						IsVisible = () => DebugApi.GetMemorySize(MemoryType.SnesPrgRom) > 0
 					},
 					new ContextMenuAction() {
+						ActionType = ActionType.GenerateBranchLabels,
+						IsVisible = () => DebugApi.GetMemorySize(MemoryType.SnesPrgRom) > 0,
+						IsEnabled = () => DebugApi.GetMemorySize(MemoryType.SnesPrgRom) > 0,
+						OnClick = async () => {
+							var missing = Diz.DizWorkspaceLoader.ComputeMissingSyntheticBranchLabels();
+							if(missing.Count == 0) {
+								await MessageBox.Show(wnd, "All branch targets already have labels.", "Generate Branch Labels", MessageBoxButtons.OK, MessageBoxIcon.Info);
+								return;
+							}
+							string q = $"{missing.Count} branch target address{(missing.Count == 1 ? "" : "es")} {(missing.Count == 1 ? "has" : "have")} no label. Create them now?";
+							var r = await MessageBox.Show(wnd, q, "Generate Branch Labels", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+							if(r == DialogResult.Yes) {
+								Diz.DizWorkspaceLoader.CreateSyntheticBranchLabels(missing);
+								await MessageBox.Show(wnd, $"Created {missing.Count} label{(missing.Count == 1 ? "" : "s")}.", "Generate Branch Labels", MessageBoxButtons.OK, MessageBoxIcon.Info);
+							}
+						}
+					},
+					new ContextMenuAction() {
 						ActionType = ActionType.ExportAsm,
 						IsVisible = () => DebugApi.GetMemorySize(MemoryType.SnesPrgRom) > 0,
 						IsEnabled = () => DebugApi.GetMemorySize(MemoryType.SnesPrgRom) > 0,
 						OnClick = async () => {
+							var missing = Diz.DizWorkspaceLoader.ComputeMissingSyntheticBranchLabels();
+							if(missing.Count > 0) {
+								string msg = $"{missing.Count} branch target address{(missing.Count == 1 ? "" : "es")} {(missing.Count == 1 ? "has" : "have")} no label.\n\n" +
+								             $"Yes    = Export without creating labels\n" +
+								             $"No     = Create labels and export\n" +
+								             $"Cancel = Cancel without doing either";
+								var result = await MessageBox.Show(wnd, msg, "Missing Branch Labels", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+								if(result == DialogResult.Cancel) return;
+								if(result == DialogResult.No) {
+									Diz.DizWorkspaceLoader.CreateSyntheticBranchLabels(missing);
+								}
+							}
 							string initFilename = EmuApi.GetRomInfo().GetRomName() + "." + FileDialogHelper.AsmExt;
 							string? filename = await FileDialogHelper.SaveFile(null, initFilename, wnd, FileDialogHelper.AsmExt);
 							if(filename != null) {

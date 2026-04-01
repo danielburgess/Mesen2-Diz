@@ -3669,6 +3669,7 @@ E
 			<Value ID="ImportDizProject">Import DiztinGUIsh project...</Value>
 			<Value ID="ExportDizProject">Export DiztinGUIsh project...</Value>
 			<Value ID="ExportAsm">Export ASM (.asm)...</Value>
+			<Value ID="GenerateBranchLabels">Generate branch labels...</Value>
 			<Value ID="ImportWatchEntries">Import watch entries...</Value>
 			<Value ID="ExportWatchEntries">Export watch entries...</Value>
 

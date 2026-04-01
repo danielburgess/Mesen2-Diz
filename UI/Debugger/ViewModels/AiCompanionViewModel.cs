@@ -24,6 +24,7 @@ namespace Mesen.Debugger.ViewModels
 		[Reactive] public EntryKind Kind { get; set; }
 		[Reactive] public string Text { get; set; } = "";
 		[Reactive] public bool IsStreaming { get; set; }
+		[Reactive] public string StreamingIndicator { get; private set; } = ".";
 		public DateTime Timestamp { get; init; } = DateTime.Now;
 
 		public bool IsUser => Kind == EntryKind.User;
@@ -35,6 +36,36 @@ namespace Mesen.Debugger.ViewModels
 		public string TimestampDisplay => Timestamp.ToString("HH:mm:ss");
 
 		public void AppendText(string delta) => Text += delta;
+
+		private static readonly string[] _frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+		private Avalonia.Threading.DispatcherTimer? _streamTimer;
+		private int _frameIndex;
+
+		public ChatEntry()
+		{
+			this.WhenAnyValue(x => x.IsStreaming).Subscribe(streaming => {
+				// Always manipulate the timer on the UI thread — ChatEntry may be constructed
+				// on a background thread and IsStreaming set via object initializer before
+				// it's added to the UI collection.
+				Avalonia.Threading.Dispatcher.UIThread.Post(() => {
+					if(streaming) {
+						_frameIndex = 0;
+						StreamingIndicator = _frames[0];
+						_streamTimer = new Avalonia.Threading.DispatcherTimer {
+							Interval = TimeSpan.FromMilliseconds(80)
+						};
+						_streamTimer.Tick += (_, _) => {
+							_frameIndex = (_frameIndex + 1) % _frames.Length;
+							StreamingIndicator = _frames[_frameIndex];
+						};
+						_streamTimer.Start();
+					} else {
+						_streamTimer?.Stop();
+						_streamTimer = null;
+					}
+				});
+			});
+		}
 	}
 
 	public class ChatHistoryEntry
@@ -722,6 +753,14 @@ Hardware interrupt vectors (native mode, all map modes):
 13. CGRAM: 256 palette entries × 2 bytes (BGR555 format). Palettes 0–7 = background, 8–15 = sprites. Write via $2121 (address) and $2122 (data, low then high byte).
 14. Mode 7: single BG layer, 8-bit tile indices, 8×8 tiles, each tile has its own palette entry, affine transform applied per scanline via $211B–$2120. Mode 7 games often use bank $7E for tile map and $7F or a ROM bank for tile data.
 15. FastROM ($420D bit 0): enables fast (3.58MHz) ROM access for banks $80–$FF. SlowROM banks $00–$3F / $40–$7F run at 2.68MHz. A game must set EnableFastRom=1 ($4200 family) to benefit.");
+
+			// ── CDL transience reminder ───────────────────────────────────────────
+			sb.AppendLine();
+			sb.AppendLine(
+@"## Critical Rule: CDL Coverage is Session-Transient
+CDL (Code/Data Log) figures reported by get_rom_map and get_annotation_summary reflect ONLY what has been executed in the current debugger session. They reset to zero when the session starts and grow as the game runs under the debugger.
+
+NEVER treat CDL coverage percentages as persistent facts about the ROM. NEVER include CDL coverage figures in any turn summary you write — the values will be stale and misleading in future turns. Call get_rom_map again when you need current coverage.");
 
 			// ── Available Tools ───────────────────────────────────────────────────
 			sb.AppendLine();

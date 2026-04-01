@@ -3,12 +3,14 @@ using Mesen.Annotation.Asm;
 using Mesen.Annotation.Diz;
 using Mesen.Config;
 using Mesen.Debugger.Labels;
+using Mesen.Debugger.Utilities;
 using Mesen.Interop;
 using Mesen.Utilities;
 using Mesen.Windows;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.IO.Compression;
 using System.Text;
 
@@ -178,6 +180,22 @@ namespace Mesen.Debugger.Diz
 				updated = DizToMesenAdapter.MergeFromCdlData(base_, cdlBytes);
 			}
 
+			// Always refresh labels from the live LabelManager so that any labels
+			// added/changed since CurrentStore was first built are included.
+			BuildLabelDicts(liveSize, updated.MapMode,
+				out var labels, out var labelComments, out var comments);
+			updated = new RomAnnotationStore {
+				RomGameName   = updated.RomGameName,
+				RomChecksum   = updated.RomChecksum,
+				MapMode       = updated.MapMode,
+				Speed         = updated.Speed,
+				SaveVersion   = updated.SaveVersion,
+				Bytes         = updated.Bytes,
+				Labels        = labels,
+				LabelComments = labelComments,
+				Comments      = comments,
+			};
+
 			CurrentStore = updated;
 
 			byte[] romBytes = DebugApi.GetMemoryState(memType);
@@ -194,6 +212,100 @@ namespace Mesen.Debugger.Diz
 				Path.GetFileName(path));
 		}
 
+		// ── Synthetic branch label generation ────────────────────────────────
+
+		/// <summary>
+		/// Computes CodeLabel entries for every BRA/BRL branch target that has no
+		/// label in LabelManager. Returns an empty list if no ROM is loaded.
+		/// </summary>
+		public static List<CodeLabel> ComputeMissingSyntheticBranchLabels()
+		{
+			MemoryType memType  = MemoryType.SnesPrgRom;
+			int        liveSize = DebugApi.GetMemorySize(memType);
+			if(liveSize <= 0) return new List<CodeLabel>();
+
+			// Build a store the same way ExportAsmFile does.
+			RomAnnotationStore? store = CurrentStore ?? BuildStoreFromMesen(memType, liveSize);
+			if(store == null) return new List<CodeLabel>();
+
+			if(liveSize > 0) {
+				CdlFlags[] cdlFlags = DebugApi.GetCdlData(0, (uint)liveSize, memType);
+				byte[]     cdlBytes = new byte[cdlFlags.Length];
+				for(int i = 0; i < cdlFlags.Length; i++) cdlBytes[i] = (byte)cdlFlags[i];
+				store = DizToMesenAdapter.MergeFromCdlData(store, cdlBytes);
+			}
+
+			byte[] romBytes = DebugApi.GetMemoryState(memType);
+
+			// Build ROM-offset keyed dict of labels currently in LabelManager.
+			BuildLabelDicts(liveSize, store.MapMode,
+				out var labels, out _, out _);
+			var existingByOffset = new Dictionary<int, string>(labels.Count);
+			foreach(var (snesAddr, name) in labels) {
+				if(SnesAddressConverter.TryToRomOffset(snesAddr, store.MapMode, out int off))
+					existingByOffset[off] = name;
+			}
+
+			return SnesAsmExporter.FindUnlabeledBranchTargets(store, romBytes, existingByOffset)
+				.Select(t => new CodeLabel {
+					Address    = (uint)t.romOffset,
+					MemoryType = memType,
+					Label      = t.name,
+					Comment    = "",
+					Length     = 1,
+				})
+				.ToList();
+		}
+
+		/// <summary>
+		/// Adds <paramref name="labels"/> to LabelManager and auto-saves the workspace.
+		/// </summary>
+		public static void CreateSyntheticBranchLabels(IReadOnlyList<CodeLabel> labels)
+		{
+			if(labels.Count == 0) return;
+			var safe = labels.Where(l => {
+				CodeLabel? existing = LabelManager.GetLabel(l.Address, l.MemoryType);
+				return existing == null || existing.Label.Length == 0;
+			}).ToList();
+			if(safe.Count == 0) return;
+			LabelManager.SetLabels(safe, raiseEvents: true);
+			DebugWorkspaceManager.AutoSave();
+		}
+
+		// ── Build label dictionaries from live LabelManager ──────────────────
+		// Accepts any memory type (SnesPrgRom or SnesMemory) and normalises to a
+		// SNES CPU address via GetAbsoluteAddress so that UI-set labels are included.
+
+		private static void BuildLabelDicts(int liveSize, RomMapMode mapMode,
+			out Dictionary<int, string> labels,
+			out Dictionary<int, string> labelComments,
+			out Dictionary<int, string> comments)
+		{
+			labels        = new Dictionary<int, string>();
+			labelComments = new Dictionary<int, string>();
+			comments      = new Dictionary<int, string>();
+
+			var seen = new HashSet<int>();
+			foreach(CodeLabel cl in LabelManager.GetAllLabels()) {
+				// Normalise to PRG ROM offset, accepting labels from any address space.
+				AddressInfo abs = cl.MemoryType == MemoryType.SnesPrgRom
+					? new AddressInfo { Address = (int)cl.Address, Type = MemoryType.SnesPrgRom }
+					: DebugApi.GetAbsoluteAddress(new AddressInfo { Address = (int)cl.Address, Type = cl.MemoryType });
+				if(abs.Type != MemoryType.SnesPrgRom || abs.Address < 0) continue;
+				if(!seen.Add(abs.Address)) continue;
+
+				if(!SnesAddressConverter.TryToSnesAddress(abs.Address, liveSize, mapMode, out int snesAddr)) continue;
+
+				if(cl.Label.Length > 0) {
+					labels[snesAddr] = cl.Label;
+					if(cl.Comment.Length > 0)
+						labelComments[snesAddr] = cl.Comment;
+				} else if(cl.Comment.Length > 0) {
+					comments[snesAddr] = cl.Comment;
+				}
+			}
+		}
+
 		// ── Build store from live Mesen state ─────────────────────────────────
 
 		private static RomAnnotationStore? BuildStoreFromMesen(MemoryType memType, int liveSize)
@@ -207,6 +319,11 @@ namespace Mesen.Debugger.Diz
 			TryDetectSnesHeader(romBytes, out RomMapMode mapMode, out RomSpeed speed, out string gameName, out uint checksum);
 
 			// Build ByteAnnotation[] from live CDL flags.
+			// NOTE: Mesen's CDL sets Code on ALL bytes fetched during execution —
+			// both opcodes and their operands.  We initially mark everything Code
+			// as Opcode, then do a second instruction-walk pass to re-mark the
+			// operand bytes correctly so FindUnlabeledBranchTargets doesn't produce
+			// spurious labels from operand bytes whose values look like BRA/BRL.
 			CdlFlags[] cdlFlags = DebugApi.GetCdlData(0, (uint)liveSize, memType);
 			var bytes = new ByteAnnotation[liveSize];
 			for(int i = 0; i < liveSize; i++) {
@@ -226,23 +343,12 @@ namespace Mesen.Debugger.Diz
 				};
 			}
 
-			// Convert LabelManager SnesPrgRom labels (ROM offset) → SNES address dicts.
-			var labelDict        = new Dictionary<int, string>();
-			var labelCommentDict = new Dictionary<int, string>();
-			var commentDict      = new Dictionary<int, string>();
+			// Second pass: walk from SubEntryPoint / JumpTarget seeds to fix
+			// operand bytes that CDL mis-marks as Code (and therefore Opcode).
+			FixupOperandBytes(bytes, romBytes, cdlFlags, liveSize);
 
-			foreach(CodeLabel cl in LabelManager.GetAllLabels()) {
-				if(cl.MemoryType != MemoryType.SnesPrgRom) continue;
-				if(!SnesAddressConverter.TryToSnesAddress((int)cl.Address, liveSize, mapMode, out int snesAddr)) continue;
-
-				if(cl.Label.Length > 0) {
-					labelDict[snesAddr] = cl.Label;
-					if(cl.Comment.Length > 0)
-						labelCommentDict[snesAddr] = cl.Comment;
-				} else if(cl.Comment.Length > 0) {
-					commentDict[snesAddr] = cl.Comment;
-				}
-			}
+			BuildLabelDicts(liveSize, mapMode,
+				out var labelDict, out var labelCommentDict, out var commentDict);
 
 			return new RomAnnotationStore {
 				RomGameName   = gameName,
@@ -255,6 +361,63 @@ namespace Mesen.Debugger.Diz
 				LabelComments = labelCommentDict,
 				Comments      = commentDict,
 			};
+		}
+
+		// ── Operand byte fixup ────────────────────────────────────────────────
+
+		/// <summary>
+		/// Walks the instruction stream from known entry points (SubEntryPoint and
+		/// JumpTarget CDL seeds) and marks operand bytes as <see cref="ByteType.Operand"/>.
+		///
+		/// Mesen's CDL sets <see cref="CdlFlags.Code"/> on every byte the CPU fetched,
+		/// including operand bytes.  Without this pass every Code byte would be typed
+		/// as Opcode, causing <c>FindUnlabeledBranchTargets</c> to treat operand bytes
+		/// whose value happens to be a BRA/BRL opcode as real branch instructions and
+		/// produce thousands of spurious CODE_ labels.
+		/// </summary>
+		private static void FixupOperandBytes(
+			ByteAnnotation[] bytes, byte[] romBytes, CdlFlags[] cdl, int len)
+		{
+			var visited  = new HashSet<int>(len / 4);
+			var worklist = new Queue<int>();
+
+			// Seed from:
+			//  1. SubEntryPoint / JumpTarget — CDL-confirmed instruction starts.
+			//  2. The first Code byte of every contiguous Code run — these must be
+			//     opcode bytes because no preceding Code byte could be their operand.
+			//     This covers isolated code regions with no CDL entry-point markers.
+			for(int i = 0; i < len; i++) {
+				if((cdl[i] & CdlFlags.Code) == 0) continue;
+				bool isMarked  = (cdl[i] & (CdlFlags.SubEntryPoint | CdlFlags.JumpTarget)) != 0;
+				bool isRunStart = i == 0 || (cdl[i - 1] & CdlFlags.Code) == 0;
+				if(isMarked || isRunStart)
+					worklist.Enqueue(i);
+			}
+
+			while(worklist.Count > 0) {
+				int off = worklist.Dequeue();
+				if(off < 0 || off >= len) continue;
+				if(!visited.Add(off)) continue;
+				if((cdl[off] & CdlFlags.Code) == 0) continue;
+
+				bool m = (cdl[off] & CdlFlags.MemoryMode8) != 0;
+				bool x = (cdl[off] & CdlFlags.IndexMode8)  != 0;
+				int operands = SnesAsmExporter.GetOperandByteCount(romBytes[off], m, x);
+
+				// Re-mark the operand bytes that CDL incorrectly left as Opcode.
+				for(int j = 1; j <= operands; j++) {
+					int opOff = off + j;
+					if(opOff >= len) break;
+					if((cdl[opOff] & CdlFlags.Code) != 0)
+						bytes[opOff] = bytes[opOff] with { Type = ByteType.Operand };
+					visited.Add(opOff);
+				}
+
+				// Follow sequential fall-through to the next instruction.
+				int next = off + 1 + operands;
+				if(next < len && (cdl[next] & CdlFlags.Code) != 0)
+					worklist.Enqueue(next);
+			}
 		}
 
 		// ── SNES header detection ─────────────────────────────────────────────
