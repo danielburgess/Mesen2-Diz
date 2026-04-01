@@ -511,14 +511,22 @@ public static class SnesAsmExporter
             if (!SnesAddressConverter.TryToRomOffset(targetSnes, map, out int targetOffset)) continue;
             if (targetOffset >= romLen) continue;
 
-            if (store.Bytes[targetOffset].Type == ByteType.Operand)
+            if (store.Bytes[targetOffset].Type != ByteType.Opcode)
             {
-                // Target lands inside another instruction — it can never receive a
-                // positional label.  Generate a LOOSE_OP_ assignment label instead.
+                // Target is not at an instruction start.  A positional label here
+                // would fragment db directives in data/unreached regions.
+                // Emit as an address assignment instead.
+                //   Operand  → mid-instruction target  → LOOSE_OP_ name
+                //   anything else → cold/data byte     → CODE_ name (still an assignment)
                 if (!userLabelsByOffset.ContainsKey(targetOffset))
                 {
                     if (SnesAddressConverter.TryToSnesAddress(targetOffset, romLen, map, out int tSnes))
-                        looseLabels.TryAdd(targetOffset, $"LOOSE_OP_{tSnes:X6}");
+                    {
+                        string name = store.Bytes[targetOffset].Type == ByteType.Operand
+                            ? $"LOOSE_OP_{tSnes:X6}"
+                            : $"CODE_{AsmSnesAddr(tSnes, map):X6}";
+                        looseLabels.TryAdd(targetOffset, name);
+                    }
                 }
                 continue;
             }
