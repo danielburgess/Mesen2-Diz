@@ -212,6 +212,70 @@ namespace Mesen.Debugger.Diz
 				Path.GetFileName(path));
 		}
 
+		/// <summary>
+		/// Merge live CDL data into the current store (or build one from scratch),
+		/// disassemble the ROM, and write a split multi-file export to
+		/// <paramref name="directory"/>: a main file, a label definitions file, and
+		/// one per-bank code/data file, all named using <paramref name="baseName"/>
+		/// as a stem.
+		/// </summary>
+		public static void ExportAsmFileSplit(string directory, string baseName)
+		{
+			MemoryType memType  = MemoryType.SnesPrgRom;
+			int        liveSize = DebugApi.GetMemorySize(memType);
+
+			RomAnnotationStore? base_ = CurrentStore;
+			if(base_ == null) {
+				base_ = BuildStoreFromMesen(memType, liveSize);
+				if(base_ == null) {
+					MesenMsgBox.Show(null, "DizExportNoRom", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+					return;
+				}
+			}
+
+			RomAnnotationStore updated = base_;
+			if(liveSize > 0) {
+				CdlFlags[] cdlFlags = DebugApi.GetCdlData(0, (uint)liveSize, memType);
+				byte[]     cdlBytes = new byte[cdlFlags.Length];
+				for(int i = 0; i < cdlFlags.Length; i++)
+					cdlBytes[i] = (byte)cdlFlags[i];
+				updated = DizToMesenAdapter.MergeFromCdlData(base_, cdlBytes);
+			}
+
+			BuildLabelDicts(liveSize, updated.MapMode,
+				out var labels, out var labelComments, out var comments);
+			updated = new RomAnnotationStore {
+				RomGameName   = updated.RomGameName,
+				RomChecksum   = updated.RomChecksum,
+				MapMode       = updated.MapMode,
+				Speed         = updated.Speed,
+				SaveVersion   = updated.SaveVersion,
+				Bytes         = updated.Bytes,
+				Labels        = labels,
+				LabelComments = labelComments,
+				Comments      = comments,
+			};
+
+			CurrentStore = updated;
+
+			byte[] romBytes = DebugApi.GetMemoryState(memType);
+
+			try {
+				SnesAsmSplitResult result = SnesAsmExporter.ExportSplit(updated, romBytes, baseName);
+				var utf8NoBom = new System.Text.UTF8Encoding(false);
+				File.WriteAllText(Path.Combine(directory, $"{baseName}_main.asm"),   result.MainFile,   utf8NoBom);
+				File.WriteAllText(Path.Combine(directory, $"{baseName}_labels.asm"), result.LabelsFile, utf8NoBom);
+				foreach(var (bank, content) in result.BankFiles)
+					File.WriteAllText(Path.Combine(directory, $"{baseName}_bank{bank:X2}.asm"), content, utf8NoBom);
+			} catch(Exception ex) {
+				MesenMsgBox.Show(null, "DizExportError", MessageBoxButtons.OK, MessageBoxIcon.Error, ex.Message);
+				return;
+			}
+
+			MesenMsgBox.Show(null, "DizExportSuccess", MessageBoxButtons.OK, MessageBoxIcon.Info,
+				$"{baseName}_main.asm");
+		}
+
 		// ── Synthetic branch label generation ────────────────────────────────
 
 		/// <summary>

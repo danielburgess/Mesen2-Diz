@@ -878,6 +878,30 @@ namespace Mesen.Debugger.ViewModels
 							}
 						}
 					},
+					new ContextMenuAction() {
+						ActionType = ActionType.ExportAsmSplit,
+						IsVisible = () => DebugApi.GetMemorySize(MemoryType.SnesPrgRom) > 0,
+						IsEnabled = () => DebugApi.GetMemorySize(MemoryType.SnesPrgRom) > 0,
+						OnClick = async () => {
+							var missing = Diz.DizWorkspaceLoader.ComputeMissingSyntheticBranchLabels();
+							if(missing.Count > 0) {
+								string msg = $"{missing.Count} branch target address{(missing.Count == 1 ? "" : "es")} {(missing.Count == 1 ? "has" : "have")} no label.\n\n" +
+								             $"Yes    = Export without creating labels\n" +
+								             $"No     = Create labels and export\n" +
+								             $"Cancel = Cancel without doing either";
+								var result = await MessageBox.Show(wnd, msg, "Missing Branch Labels", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+								if(result == DialogResult.Cancel) return;
+								if(result == DialogResult.No) {
+									Diz.DizWorkspaceLoader.CreateSyntheticBranchLabels(missing);
+								}
+							}
+							string? folder = await FileDialogHelper.OpenFolder(wnd);
+							if(folder != null) {
+								string baseName = EmuApi.GetRomInfo().GetRomName();
+								Diz.DizWorkspaceLoader.ExportAsmFileSplit(folder, baseName);
+							}
+						}
+					},
 				}
 			};
 		}

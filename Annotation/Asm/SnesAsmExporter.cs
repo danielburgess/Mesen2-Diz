@@ -3,6 +3,19 @@ using System.Text;
 namespace Mesen.Annotation.Asm;
 
 /// <summary>
+/// Result of <see cref="SnesAsmExporter.ExportSplit"/>.
+/// </summary>
+public class SnesAsmSplitResult
+{
+    /// <summary>Main file content (map directive + incsrc references).</summary>
+    public required string MainFile   { get; init; }
+    /// <summary>Labels file content (NAME = $ADDR assignments).</summary>
+    public required string LabelsFile { get; init; }
+    /// <summary>Per-bank file content keyed by bank number (upper SNES address byte).</summary>
+    public required SortedDictionary<int, string> BankFiles { get; init; }
+}
+
+/// <summary>
 /// Exports a <see cref="RomAnnotationStore"/> plus the raw ROM bytes to an
 /// Asar-compatible 65816 assembly source file (.asm).
 ///
@@ -154,6 +167,151 @@ public static class SnesAsmExporter
         EmitLabelAssignments(sb, store, looseLabelsByOffset, synthLabelsByOffset, visitedOffsets, map);
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Generate a split multi-file Asar-compatible 65816 .asm export.
+    /// Returns a <see cref="SnesAsmSplitResult"/> containing:
+    /// <list type="bullet">
+    ///   <item>A main file with the map directive and <c>incsrc</c> references.</item>
+    ///   <item>A labels file with all <c>NAME = $ADDR</c> variable assignments.</item>
+    ///   <item>One bank file per ROM bank with the disassembled code/data.</item>
+    /// </list>
+    /// </summary>
+    /// <param name="baseName">
+    /// File name stem (no extension, no directory) used in <c>incsrc</c> directives
+    /// and to derive output file names when writing files.
+    /// </param>
+    public static SnesAsmSplitResult ExportSplit(RomAnnotationStore store, byte[] romBytes, string baseName)
+    {
+        if (romBytes.Length != store.Bytes.Length)
+            throw new ArgumentException(
+                $"romBytes length {romBytes.Length} does not match " +
+                $"store.Bytes length {store.Bytes.Length}.",
+                nameof(romBytes));
+
+        int        romLen = romBytes.Length;
+        RomMapMode map    = store.MapMode;
+
+        var labelsByOffset        = BuildOffsetDict(store.Labels,        map);
+        var commentsByOffset      = BuildOffsetDict(store.Comments,      map);
+        var labelCommentsByOffset = BuildOffsetDict(store.LabelComments, map);
+
+        var (synthLabelsByOffset, looseLabelsByOffset) =
+            BuildSynthBranchLabels(store, romBytes, labelsByOffset, map);
+
+        var allLabelsByOffset = new Dictionary<int, string>(labelsByOffset);
+        foreach (var (offset, name) in synthLabelsByOffset)
+            allLabelsByOffset.TryAdd(offset, name);
+        foreach (var (offset, name) in looseLabelsByOffset)
+            allLabelsByOffset.TryAdd(offset, name);
+
+        var bankBuilders = new SortedDictionary<int, StringBuilder>();
+        var bankPrev     = new Dictionary<int, (int snesAddr, int size)>();
+        var visitedOffsets = new HashSet<int>();
+
+        int i = 0;
+        while (i < romLen)
+        {
+            var ann = store.Bytes[i];
+
+            if (!SnesAddressConverter.TryToSnesAddress(i, romLen, map, out int snesAddr))
+            {
+                i++;
+                continue;
+            }
+
+            visitedOffsets.Add(i);
+
+            int bankNum = AsmSnesAddr(snesAddr, map) >> 16;
+            if (!bankBuilders.TryGetValue(bankNum, out var sb))
+            {
+                sb = new StringBuilder();
+                bankBuilders[bankNum] = sb;
+            }
+
+            bool firstInBank = !bankPrev.ContainsKey(bankNum);
+            bankPrev.TryGetValue(bankNum, out var prev);
+            int prevSnesAddr = firstInBank ? -1 : prev.snesAddr;
+            int prevSize     = prev.size;
+
+            bool needsOrg = prevSnesAddr < 0 || snesAddr != prevSnesAddr + prevSize;
+            if (needsOrg)
+            {
+                if (prevSnesAddr >= 0) sb.AppendLine();
+                sb.AppendLine($"        org ${AsmSnesAddr(snesAddr, map):X6}");
+                sb.AppendLine();
+            }
+
+            if (labelCommentsByOffset.TryGetValue(i, out var block) && block.Length > 0)
+            {
+                foreach (var line in block.Split('\n'))
+                    sb.AppendLine($"; {line.TrimEnd('\r')}");
+            }
+
+            if (allLabelsByOffset.TryGetValue(i, out var label) && label.Length > 0
+                && !looseLabelsByOffset.ContainsKey(i))
+                sb.AppendLine($"{label}:");
+
+            commentsByOffset.TryGetValue(i, out var inlineComment);
+
+            int size;
+            if (ann.Type == ByteType.Opcode)
+            {
+                int  numOpsAhead        = OperandBytes(Table[romBytes[i]].Mode, ann.MFlag, ann.XFlag);
+                bool crossesBankBoundary = (snesAddr & 0xFFFF) + 1 + numOpsAhead > 0x10000;
+                if (crossesBankBoundary)
+                {
+                    sb.AppendLine($"        db ${romBytes[i]:X2}");
+                    size = 1;
+                }
+                else
+                    size = EmitInstruction(sb, romBytes, i, snesAddr, ann, inlineComment,
+                                           allLabelsByOffset, map);
+            }
+            else if (ann.Type == ByteType.Unreached || ann.Type == ByteType.Operand)
+            {
+                size = EmitDbGroup(sb, store, romBytes, i, inlineComment,
+                                   commentsByOffset, labelCommentsByOffset,
+                                   allLabelsByOffset, romLen, map);
+            }
+            else
+                size = EmitDataGroup(sb, store, romBytes, i, ann.Type, inlineComment,
+                                     allLabelsByOffset, commentsByOffset, labelCommentsByOffset,
+                                     romLen, map);
+
+            bankPrev[bankNum] = (snesAddr, size);
+            i += size;
+        }
+
+        // Labels file: all NAME = $ADDR assignments.
+        var labelsSb = new StringBuilder();
+        EmitLabelAssignments(labelsSb, store, looseLabelsByOffset, synthLabelsByOffset, visitedOffsets, map);
+
+        // Main file: header + map directive + incsrc references.
+        var mainSb = new StringBuilder();
+        mainSb.AppendLine($"; {store.RomGameName}");
+        mainSb.AppendLine($"; Map: {store.MapMode} | {store.Speed}");
+        mainSb.AppendLine($"; Checksum: ${store.RomChecksum:X8}");
+        mainSb.AppendLine($"; Exported by Mesen2-Diz");
+        mainSb.AppendLine();
+        mainSb.AppendLine(MapModeDirective(store.MapMode));
+        mainSb.AppendLine();
+        mainSb.AppendLine($"incsrc \"{baseName}_labels.asm\"");
+        mainSb.AppendLine();
+        foreach (int bank in bankBuilders.Keys)
+            mainSb.AppendLine($"incsrc \"{baseName}_bank{bank:X2}.asm\"");
+
+        var bankFiles = new SortedDictionary<int, string>();
+        foreach (var (bank, bsb) in bankBuilders)
+            bankFiles[bank] = bsb.ToString();
+
+        return new SnesAsmSplitResult
+        {
+            MainFile   = mainSb.ToString(),
+            LabelsFile = labelsSb.ToString(),
+            BankFiles  = bankFiles,
+        };
     }
 
     // ── File header ───────────────────────────────────────────────────────────
