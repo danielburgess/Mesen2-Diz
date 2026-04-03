@@ -285,6 +285,11 @@
 			</CheckBox>
 			
 			<CheckBox
+				IsChecked="{Binding Config.OpenOnGameLoad}"
+				Content="{l:Translate chkOpenOnGameLoad}"
+			/>
+
+			<CheckBox
 				IsChecked="{Binding Config.BringToFrontOnBreak}"
 				Content="{l:Translate chkBringToFrontOnBreak}"
 			/>

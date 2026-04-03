@@ -55,6 +55,8 @@ namespace Mesen.Config
 		
 		[Reactive] public bool RefreshWhileRunning { get; set; } = false;
 
+		[Reactive] public bool OpenOnGameLoad { get; set; } = true;
+
 		[Reactive] public bool BringToFrontOnBreak { get; set; } = true;
 		[Reactive] public bool BringToFrontOnPause { get; set; } = false;
 		[Reactive] public bool FocusGameOnResume { get; set; } = false;

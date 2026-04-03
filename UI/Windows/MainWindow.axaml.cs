@@ -331,6 +331,10 @@ namespace Mesen.Windows
 								this.GetControl<Panel>("RendererPanel").Focus();
 							}
 
+							if(ConfigManager.Config.Debug.Debugger.OpenOnGameLoad) {
+								DebuggerWindow.GetOrOpenWindow(romInfo.ConsoleType.GetMainCpuType());
+							}
+
 							DispatcherTimer.RunOnce(() => {
 								if(_cmdLine != null) {
 									_cmdLine?.ProcessPostLoadCommandSwitches(this);
