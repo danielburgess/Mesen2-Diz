@@ -5,6 +5,8 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
+using Avalonia.VisualTree;
+using DataBoxControl.Primitives;
 using System.Linq;
 using System.Reactive.Linq;
 
@@ -63,10 +65,26 @@ public class DataBoxEditableTextColumn : DataBoxBoundColumn
 
 				textBox.KeyDown += OnKeyDown;
 				textBox.LostFocus += OnLostFocus;
+				textBox.GotFocus += OnGotFocus;
 
 				return textBox;
 			},
 			supportsRecycling: false);
+	}
+
+	private static void OnGotFocus(object? sender, GotFocusEventArgs e)
+	{
+		if(sender is not TextBox tb) return;
+		// When the TextBox captures a pointer click the PointerPressed event is consumed
+		// before it bubbles to the ListBox row, so the row never gets selected.
+		// Manually select the parent row here to ensure the highlight follows the edit cursor.
+		var row = tb.FindAncestorOfType<DataBoxRow>();
+		var presenter = tb.FindAncestorOfType<DataBoxRowsPresenter>();
+		if(row != null && presenter != null) {
+			int index = presenter.GetRowIndex(row);
+			if(index >= 0 && presenter.SelectedIndex != index)
+				presenter.SelectedIndex = index;
+		}
 	}
 
 	private static void OnKeyDown(object? sender, KeyEventArgs e)

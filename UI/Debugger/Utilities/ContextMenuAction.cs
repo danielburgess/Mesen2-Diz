@@ -785,6 +785,7 @@ namespace Mesen.Debugger.Utilities
 		[IconFile("Export")]
 		ExportAsmSplit,
 		GenerateBranchLabels,
+		GenerateCdlFunctionLabels,
 		
 		[IconFile("Import")]
 		ImportWatchEntries,

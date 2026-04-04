@@ -38,6 +38,30 @@
 			ColumnWidths="{Binding ColumnWidths}"
 		>
 			<DataBox.Columns>
+				<DataBoxTemplateColumn ColumnName="AiModified" Header="AI" InitialWidth="18" CanUserResize="False" CanUserSort="True">
+					<DataTemplate>
+						<Ellipse
+							x:DataType="vm:FunctionViewModel"
+							Width="8" Height="8"
+							HorizontalAlignment="Center" VerticalAlignment="Center"
+							Fill="#22CC44"
+							IsVisible="{Binding IsAiModified}"
+							ToolTip.Tip="Added or updated by AI this session"
+						/>
+					</DataTemplate>
+				</DataBoxTemplateColumn>
+				<DataBoxTemplateColumn ColumnName="Category" Header="{l:Translate colCategory}" InitialWidth="80" CanUserResize="True" CanUserSort="True">
+					<DataTemplate>
+						<TextBlock
+							x:DataType="vm:FunctionViewModel"
+							Text="{Binding CategoryDisplay}"
+							Foreground="{Binding CategoryColor}"
+							FontSize="10"
+							VerticalAlignment="Center"
+							Margin="3,0"
+						/>
+					</DataTemplate>
+				</DataBoxTemplateColumn>
 				<DataBoxTextColumn
 					ColumnName="Function"
 					Header="{l:Translate colFunction}"

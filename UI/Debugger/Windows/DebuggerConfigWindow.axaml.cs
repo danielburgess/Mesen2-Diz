@@ -65,6 +65,12 @@ namespace Mesen.Debugger.Windows
 			Close();
 		}
 
+		private void OnResetModePromptsClick(object sender, RoutedEventArgs e)
+		{
+			_model.AiConfig.ExplorerModePrompt = AiModeDefaults.ExplorerPrompt;
+			_model.AiConfig.AnnotationModePrompt = AiModeDefaults.AnnotationPrompt;
+		}
+
 		protected override void OnKeyDown(KeyEventArgs e)
 		{
 			base.OnKeyDown(e);

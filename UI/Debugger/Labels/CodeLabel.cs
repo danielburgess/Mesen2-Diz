@@ -1,4 +1,5 @@
-﻿using Mesen.Interop;
+﻿using Mesen.Config;
+using Mesen.Interop;
 using Mesen.Utilities;
 using ReactiveUI;
 using ReactiveUI.Fody.Helpers;
@@ -16,6 +17,7 @@ namespace Mesen.Debugger.Labels
 		public string Comment { get; set; } = "";
 		public CodeLabelFlags Flags { get; set; }
 		public UInt32 Length { get; set; } = 1;
+		public FunctionCategory Category { get; set; } = FunctionCategory.None;
 
 		public CodeLabel()
 		{

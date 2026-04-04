@@ -350,6 +350,43 @@
 									FormatString="0" FontSize="11" Padding="3,2" Margin="0,4,0,0" />
 								</Grid>
 						</c:OptionSection>
+
+						<c:OptionSection Header="Mode Prompts">
+							<StackPanel>
+								<TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"
+									Text="Each mode appends an addendum to the base system prompt. Edit below to customize AI behaviour per mode." />
+
+								<TextBlock FontSize="11" FontWeight="SemiBold" Margin="0,6,0,2" Text="Explorer Mode Prompt" />
+								<TextBlock FontSize="10" Foreground="{StaticResource MesenTextMutedColor}" Margin="0,0,0,3" TextWrapping="Wrap"
+									Text="Instructs the AI to search for hidden/unused content by manipulating memory, registers, and code paths." />
+								<TextBox
+									Text="{Binding AiConfig.ExplorerModePrompt}"
+									FontSize="11" Padding="4"
+									AcceptsReturn="True" TextWrapping="Wrap"
+									MinHeight="120" MaxHeight="300"
+									ScrollViewer.VerticalScrollBarVisibility="Auto"
+									FontFamily="{DynamicResource MesenMonospaceFont}"
+									ToolTip.Tip="System prompt addendum used when Explorer mode is active. Changes take effect on the next message." />
+
+								<TextBlock FontSize="11" FontWeight="SemiBold" Margin="0,10,0,2" Text="Annotation Mode Prompt" />
+								<TextBlock FontSize="10" Foreground="{StaticResource MesenTextMutedColor}" Margin="0,0,0,3" TextWrapping="Wrap"
+									Text="Instructs the AI to systematically label and comment all CDL-identified functions and data." />
+								<TextBox
+									Text="{Binding AiConfig.AnnotationModePrompt}"
+									FontSize="11" Padding="4"
+									AcceptsReturn="True" TextWrapping="Wrap"
+									MinHeight="120" MaxHeight="300"
+									ScrollViewer.VerticalScrollBarVisibility="Auto"
+									FontFamily="{DynamicResource MesenMonospaceFont}"
+									ToolTip.Tip="System prompt addendum used when Annotation mode is active. Changes take effect on the next message." />
+
+								<Button Margin="0,8,0,0" Padding="6,3" FontSize="11"
+									Click="OnResetModePromptsClick"
+									ToolTip.Tip="Restore both mode prompts to their built-in defaults">
+									<TextBlock Text="Reset to defaults" FontSize="11" />
+								</Button>
+							</StackPanel>
+						</c:OptionSection>
 					</StackPanel>
 				</ScrollViewer>
 			</TabItem>

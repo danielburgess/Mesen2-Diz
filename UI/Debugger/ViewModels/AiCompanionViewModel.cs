@@ -146,11 +146,16 @@ namespace Mesen.Debugger.ViewModels
 			ArchivedSessions.CollectionChanged += (_, _) => HasArchivedSessions = ArchivedSessions.Count > 0;
 
 			// Mirror provider flag and update display text when provider or model changes
-			AddDisposable(Config.WhenAnyValue(x => x.Provider, x => x.Model, (p, m) => (p, m))
+			AddDisposable(Config.WhenAnyValue(x => x.Provider, x => x.Model, x => x.ActiveMode, (p, m, mode) => (p, m, mode))
 				.Subscribe(t => {
 					IsLocalProvider = t.p == AiProvider.OpenAiCompatible;
 					string providerLabel = t.p == AiProvider.OpenAiCompatible ? "Custom AI" : "Claude";
-					ProviderModelDisplay = $"{providerLabel} · {t.m}";
+					string modeLabel = t.mode switch {
+						AiMode.Explorer   => " · Explorer",
+						AiMode.Annotation => " · Annotation",
+						_                 => ""
+					};
+					ProviderModelDisplay = $"{providerLabel} · {t.m}{modeLabel}";
 					InputWatermark = "Ask AI… (Enter to send, Shift+Enter for newline)";
 				}));
 
@@ -942,6 +947,67 @@ Use the most specific correct type. Fixing a wrong type is important — do it w
 | vector        | Hardware interrupt/reset vector entries                            | nmiVector, resetVector                     |
 | variable      | Named WRAM addresses (game variables)                              | playerHP, cameraX, frameCounter            |");
 
+			// ── Function categories ───────────────────────────────────────────────
+			sb.AppendLine();
+			sb.AppendLine(
+@"## Function categories
+
+**Rule: every label you set MUST include a category. Never omit it, never use `None`.**
+
+`None` is reserved as a sentinel meaning ""this label has never been touched by the AI."" It is the only reliable signal the user has that a label is still raw and unreviewed. If you set a label without a category — or explicitly set `None` — you destroy that signal and make the workspace harder to navigate. This is a hard constraint, not a preference.
+
+- Purpose is clear → use the matching category from the table below.
+- Analyzed but still unclear → use `Unknown` (flags it for deeper investigation).
+- Small utility with no direct game-system role → use `Helper`.
+- Dead / unreachable code → use `Unused`.
+- Developer leftover / debug screen → use `Debug`.
+
+There is always a correct category. If you are unsure between two, pick the one that describes the function's *primary* caller context.
+
+| Category     | Purpose                                                                 |
+|--------------|-------------------------------------------------------------------------|
+| Init         | One-time hardware/system setup: RESET handler, VRAM/DMA init           |
+| MainLoop     | Top-level game loop, frame dispatch                                     |
+| Interrupt    | NMI, IRQ, BRK handlers                                                  |
+| DMA          | DMA transfer routines specifically                                      |
+| Input        | Controller reading, button state tracking                               |
+| Player       | Player movement, state, health, inventory                               |
+| OAM          | Sprite/OAM buffer management                                            |
+| VRAM         | Tile/graphics uploads to VRAM                                           |
+| Tilemap      | BG tilemap writes and updates                                           |
+| Palette      | Color/palette management                                                |
+| Scrolling    | Scroll register updates, parallax                                       |
+| Animation    | Animation frame sequencing and timers                                   |
+| Effects      | Visual effects: fades, flashes, screen wipes                            |
+| Mode7        | Mode 7 math, matrix setup                                               |
+| Music        | BGM playback, SPC communication                                         |
+| SFX          | Sound effect triggers                                                   |
+| Physics      | Velocity, gravity, movement integration                                 |
+| Collision    | Hit detection and response                                              |
+| Entity       | Generic object/entity lifecycle: spawn, update, despawn                 |
+| Enemy        | Enemy-specific behavior                                                 |
+| AI           | Pathfinding, decision-making, targeting                                 |
+| Camera       | Viewport tracking, scroll bounds                                        |
+| StateMachine | State variable management, mode dispatch tables                         |
+| GameState    | High-level game mode: title, gameplay, gameover, cutscene               |
+| Menu         | Menu navigation and selection logic                                     |
+| HUD          | On-screen display: score, health bars, counters                         |
+| LevelLoad    | Map/room/level loading and setup                                        |
+| Transition   | Screen transitions, room changes                                        |
+| Script       | Script/event interpreter: bytecode VM, event queue, cutscene sequencing |
+| Dialogue     | Text box lifecycle: window drawing, letter-by-letter print, prompts     |
+| Math         | Arithmetic, trig tables, fixed-point math                               |
+| RNG          | Random number generation                                                 |
+| Timer        | Frame counters, countdown timers                                        |
+| Memory       | Memory copy, fill, compression                                          |
+| Text         | Low-level font/string rendering utilities                               |
+| Save         | SRAM read/write, save data management                                   |
+| Debug        | Developer test code, leftover debug menus                               |
+| Unused       | Dead code, unreachable, cut content                                     |
+| Unknown      | Analyzed but purpose not yet determined; needs further investigation    |
+| Helper       | Small utility/helper serving other systems; no direct game-system role  |
+| None         | RESERVED — means untouched. Never set this yourself.                    |");
+
 			// ── Workflow ──────────────────────────────────────────────────────────
 			sb.AppendLine();
 			sb.AppendLine(
@@ -994,6 +1060,15 @@ After the user acts, call get_rom_map again to see new CDL coverage, then annota
 - Findings as a compact table: address | type | name | reason.
 - One sentence per block, not a paragraph.
 - When directing gameplay: specific action + why it exposes the target code.");
+
+			// ── Mode addendum ─────────────────────────────────────────────────────
+			string modePrompt = Config.ActiveMode switch {
+				AiMode.Explorer   => Config.ExplorerModePrompt,
+				AiMode.Annotation => Config.AnnotationModePrompt,
+				_                 => ""
+			};
+			if(!string.IsNullOrWhiteSpace(modePrompt))
+				sb.AppendLine($"\n{modePrompt.Trim()}");
 
 			// ── User context ──────────────────────────────────────────────────────
 			if(!string.IsNullOrWhiteSpace(_contextText))

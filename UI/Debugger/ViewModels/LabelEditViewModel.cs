@@ -1,4 +1,5 @@
 ﻿using Avalonia.Controls;
+using Mesen.Config;
 using Mesen.Debugger.Labels;
 using Mesen.Interop;
 using Mesen.Localization;
@@ -128,6 +129,7 @@ namespace Mesen.Debugger.ViewModels
 				MemoryType = label.MemoryType;
 				Flags = label.Flags;
 				Length = label.Length;
+				Category = label.Category;
 			}
 
 			public void Commit()
@@ -138,6 +140,7 @@ namespace Mesen.Debugger.ViewModels
 				_originalLabel.MemoryType = MemoryType;
 				_originalLabel.Flags = Flags;
 				_originalLabel.Length = Length;
+				_originalLabel.Category = Category;
 			}
 
 			[Reactive] public UInt32 Address { get; set; }
@@ -146,6 +149,7 @@ namespace Mesen.Debugger.ViewModels
 			[Reactive] public string Comment { get; set; } = "";
 			[Reactive] public CodeLabelFlags Flags { get; set; }
 			[Reactive] public UInt32 Length { get; set; } = 1;
+			[Reactive] public FunctionCategory Category { get; set; } = FunctionCategory.None;
 		}
 	}
 }

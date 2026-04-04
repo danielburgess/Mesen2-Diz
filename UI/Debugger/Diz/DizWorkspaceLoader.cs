@@ -1,3 +1,4 @@
+using Avalonia.Controls;
 using Mesen.Annotation;
 using Mesen.Annotation.Asm;
 using Mesen.Annotation.Diz;
@@ -46,13 +47,13 @@ namespace Mesen.Debugger.Diz
 
 		// ── Import ────────────────────────────────────────────────────────────
 
-		public static void LoadFile(string path, bool showResult)
+		public static void LoadFile(string path, bool showResult, bool overwriteExisting = true, Window? owner = null)
 		{
 			string xml;
 			try {
 				xml = ReadDizFile(path);
 			} catch(Exception ex) {
-				MesenMsgBox.Show(null, "DizLoadError", MessageBoxButtons.OK, MessageBoxIcon.Error, ex.Message);
+				MesenMsgBox.Show(owner, "DizLoadError", MessageBoxButtons.OK, MessageBoxIcon.Error, ex.Message);
 				return;
 			}
 
@@ -60,7 +61,7 @@ namespace Mesen.Debugger.Diz
 			try {
 				store = DizProjectImporter.Import(xml);
 			} catch(Exception ex) {
-				MesenMsgBox.Show(null, "DizLoadError", MessageBoxButtons.OK, MessageBoxIcon.Error, ex.Message);
+				MesenMsgBox.Show(owner, "DizLoadError", MessageBoxButtons.OK, MessageBoxIcon.Error, ex.Message);
 				return;
 			}
 
@@ -84,6 +85,11 @@ namespace Mesen.Debugger.Diz
 				} else {
 					if(ConfigManager.Config.Debug.Integration.IsMemoryTypeImportEnabled(label.MemoryType)) {
 						if(label.Label.Length > 0 || ConfigManager.Config.Debug.Integration.ImportComments) {
+							if(!overwriteExisting) {
+								// Skip labels where a non-empty label already exists.
+								CodeLabel? existing = LabelManager.GetLabel(label.Address, label.MemoryType);
+								if(existing != null && existing.Label.Length > 0) continue;
+							}
 							labels.Add(label);
 						}
 					}
@@ -96,7 +102,7 @@ namespace Mesen.Debugger.Diz
 			CurrentStore = store;
 
 			if(showResult) {
-				MesenMsgBox.Show(null,
+				MesenMsgBox.Show(owner,
 					errors == 0 ? "ImportLabels" : "ImportLabelsWithErrors",
 					MessageBoxButtons.OK, MessageBoxIcon.Info,
 					labels.Count.ToString(), errors.ToString());
@@ -336,6 +342,53 @@ namespace Mesen.Debugger.Diz
 			DebugWorkspaceManager.AutoSave();
 		}
 
+		/// <summary>
+		/// Returns a CodeLabel for every CDL SubEntryPoint address (JSR/JSL call target)
+		/// that has no label in LabelManager. Returns an empty list if no ROM is loaded.
+		/// Labels are named "sub_XXXXXX" using the absolute ROM offset as hex.
+		/// </summary>
+		public static List<CodeLabel> ComputeMissingCdlFunctionLabels()
+		{
+			MemoryType memType  = MemoryType.SnesPrgRom;
+			int        liveSize = DebugApi.GetMemorySize(memType);
+			if(liveSize <= 0) return new List<CodeLabel>();
+
+			UInt32[] functions = DebugApi.GetCdlFunctions(memType);
+			var result = new List<CodeLabel>(functions.Length);
+			foreach(UInt32 offset in functions) {
+				if(offset >= (uint)liveSize) continue;
+				var addrInfo = new AddressInfo() { Address = (int)offset, Type = memType };
+				CodeLabel? existing = LabelManager.GetLabel(addrInfo);
+				if(existing != null && existing.Label.Length > 0) continue;
+				string name = "sub_" + offset.ToString("X6");
+				// Ensure name doesn't collide with an existing label at a different address.
+				if(LabelManager.GetLabel(name) != null) continue;
+				result.Add(new CodeLabel {
+					Address    = offset,
+					MemoryType = memType,
+					Label      = name,
+					Comment    = "",
+					Length     = 1,
+				});
+			}
+			return result;
+		}
+
+		/// <summary>
+		/// Adds CDL-derived function labels to LabelManager and auto-saves the workspace.
+		/// </summary>
+		public static void CreateCdlFunctionLabels(IReadOnlyList<CodeLabel> labels)
+		{
+			if(labels.Count == 0) return;
+			var safe = labels.Where(l => {
+				CodeLabel? existing = LabelManager.GetLabel(l.Address, l.MemoryType);
+				return existing == null || existing.Label.Length == 0;
+			}).ToList();
+			if(safe.Count == 0) return;
+			LabelManager.SetLabels(safe, raiseEvents: true);
+			DebugWorkspaceManager.AutoSave();
+		}
+
 		// ── Build label dictionaries from live LabelManager ──────────────────
 		// Accepts any memory type (SnesPrgRom or SnesMemory) and normalises to a
 		// SNES CPU address via GetAbsoluteAddress so that UI-set labels are included.
@@ -360,12 +413,18 @@ namespace Mesen.Debugger.Diz
 
 				if(!SnesAddressConverter.TryToSnesAddress(abs.Address, liveSize, mapMode, out int snesAddr)) continue;
 
+				string commentText = cl.Comment;
+				if(cl.Category != Mesen.Config.FunctionCategory.None) {
+					string prefix = $"[{cl.Category}] ";
+					commentText = commentText.Length > 0 ? prefix + commentText : prefix.TrimEnd();
+				}
+
 				if(cl.Label.Length > 0) {
 					labels[snesAddr] = cl.Label;
-					if(cl.Comment.Length > 0)
-						labelComments[snesAddr] = cl.Comment;
-				} else if(cl.Comment.Length > 0) {
-					comments[snesAddr] = cl.Comment;
+					if(commentText.Length > 0)
+						labelComments[snesAddr] = commentText;
+				} else if(commentText.Length > 0) {
+					comments[snesAddr] = commentText;
 				}
 			}
 		}

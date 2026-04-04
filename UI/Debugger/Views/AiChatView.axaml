@@ -18,7 +18,7 @@
 			BorderThickness="0,0,0,1"
 			BorderBrush="{StaticResource MesenBorderColor}"
 			Padding="4,3">
-			<Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto">
+			<Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto">
 
 				<!-- Context file -->
 				<TextBlock Grid.Column="0" Margin="0,0,2,0" FontSize="11"
@@ -39,15 +39,21 @@
 					<TextBlock Text="✕" FontSize="11" />
 				</Button>
 
+				<!-- Mode selector -->
+				<c:EnumComboBox Grid.Column="3" Margin="6,0,0,0"
+					SelectedItem="{Binding Config.ActiveMode}"
+					FontSize="11" Padding="3,1"
+					ToolTip.Tip="AI function mode — changes the system prompt addendum. Configure prompts in Debugger Settings → AI Companion." />
+
 				<!-- Provider + model (read-only; configure in Debugger Settings) -->
-				<TextBlock Grid.Column="3" Margin="8,0,0,0" FontSize="11"
+				<TextBlock Grid.Column="4" Margin="8,0,0,0" FontSize="11"
 					VerticalAlignment="Center"
 					Text="{Binding ProviderModelDisplay}"
 					Foreground="{StaticResource MesenTextMutedColor}"
 					ToolTip.Tip="Active provider and model — configure in Debugger Settings → AI Companion" />
 
 				<!-- History button -->
-				<Button Grid.Column="4" Margin="4,0,0,0" Padding="6,2"
+				<Button Grid.Column="5" Margin="4,0,0,0" Padding="6,2"
 					IsEnabled="{Binding HasArchivedSessions}"
 					ToolTip.Tip="Browse previous chat sessions">
 					<Button.Flyout>
@@ -76,7 +82,7 @@
 				</Button>
 
 				<!-- Clear chat -->
-				<Button Grid.Column="5" Margin="4,0,0,0" Padding="6,2"
+				<Button Grid.Column="6" Margin="4,0,0,0" Padding="6,2"
 					Command="{Binding ClearCommand}"
 					ToolTip.Tip="Clear chat history">
 					<TextBlock Text="Clear" FontSize="11" />

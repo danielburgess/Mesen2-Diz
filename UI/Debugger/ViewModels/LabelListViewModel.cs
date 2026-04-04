@@ -48,10 +48,12 @@ namespace Mesen.Debugger.ViewModels
 		}
 
 		private Dictionary<string, Func<LabelViewModel, LabelViewModel, int>> _comparers = new() {
-			{ "Label", (a, b) => string.Compare(a.Label.Label, b.Label.Label, StringComparison.OrdinalIgnoreCase) },
-			{ "RelAddr", (a, b) => a.RelAddress.CompareTo(b.RelAddress) },
-			{ "AbsAddr", (a, b) => a.Label.Address.CompareTo(b.Label.Address) },
-			{ "Comment", (a, b) => string.Compare(a.Label.Comment, b.Label.Comment, StringComparison.OrdinalIgnoreCase) },
+			{ "AiModified", (a, b) => a.IsAiModified.CompareTo(b.IsAiModified) },
+			{ "Category",   (a, b) => a.Label.Category.CompareTo(b.Label.Category) },
+			{ "Label",      (a, b) => string.Compare(a.Label.Label, b.Label.Label, StringComparison.OrdinalIgnoreCase) },
+			{ "RelAddr",    (a, b) => a.RelAddress.CompareTo(b.RelAddress) },
+			{ "AbsAddr",    (a, b) => a.Label.Address.CompareTo(b.Label.Address) },
+			{ "Comment",    (a, b) => string.Compare(a.Label.Comment, b.Label.Comment, StringComparison.OrdinalIgnoreCase) },
 		};
 
 		public void UpdateLabelList()
@@ -230,6 +232,9 @@ namespace Mesen.Debugger.ViewModels
 		public string RelAddressDisplay => RelAddress >= 0 ? ("$" + RelAddress.ToString(_format)) : (_isUnmappedType ? "" : "<unavailable>");
 		public object RowBrush => RelAddress >= 0 || _isUnmappedType ? AvaloniaProperty.UnsetValue : Brushes.Gray;
 		public FontStyle RowStyle => RelAddress >= 0 || _isUnmappedType ? FontStyle.Normal : FontStyle.Italic;
+		public bool IsAiModified => LabelManager.IsAiModified(Label.Address, Label.MemoryType);
+		public IBrush CategoryColor => FunctionCategoryInfo.GetBrush(Label.Category);
+		public string CategoryDisplay => FunctionCategoryInfo.GetDisplay(Label.Category);
 
 		public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -272,6 +277,12 @@ namespace Mesen.Debugger.ViewModels
 			if(changed) {
 				LabelManager.DeleteLabel(Label, false);
 				LabelManager.SetLabel(updated, true);
+				// Update our own reference so that a spurious second CommitInlineEdit call
+				// (e.g. from LostFocus firing after TopLevel.Focus() in the Enter handler)
+				// sees no diff and becomes a no-op.
+				Label = updated;
+				_labelText = updated.Label;
+				_labelComment = updated.Comment;
 				DebugWorkspaceManager.AutoSave();
 				// LabelManager fires OnLabelUpdated → UpdateLabelList() replaces rows.
 			}

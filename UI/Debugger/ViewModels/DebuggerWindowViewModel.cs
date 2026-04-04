@@ -93,15 +93,21 @@ namespace Mesen.Debugger.ViewModels
 				if(cpuType != null) {
 					CpuType = cpuType.Value;
 					if(consoleType.GetMainCpuType() != CpuType) {
-						Title = ResourceHelper.GetEnumText(CpuType) + " Debugger";
 						Icon = new WindowIcon(ImageUtilities.BitmapFromAsset("Assets/" + CpuType.ToString() + "Debugger.png"));
 						IsMainCpuDebugger = false;
+						Title = ResourceHelper.GetEnumText(CpuType) + " Debugger";
 					} else {
 						Icon = new WindowIcon(ImageUtilities.BitmapFromAsset("Assets/Debugger.png"));
+						Title = "Debugger";
 					}
 				} else {
 					CpuType = romInfo.ConsoleType.GetMainCpuType();
 					Icon = new WindowIcon(ImageUtilities.BitmapFromAsset("Assets/Debugger.png"));
+					Title = "Debugger";
+				}
+				string romName = romInfo.GetRomName();
+				if(!string.IsNullOrWhiteSpace(romName)) {
+					Title += " - " + romName;
 				}
 			}
 
@@ -855,6 +861,24 @@ namespace Mesen.Debugger.ViewModels
 						}
 					},
 					new ContextMenuAction() {
+						ActionType = ActionType.GenerateCdlFunctionLabels,
+						IsVisible = () => DebugApi.GetMemorySize(MemoryType.SnesPrgRom) > 0,
+						IsEnabled = () => DebugApi.GetMemorySize(MemoryType.SnesPrgRom) > 0,
+						OnClick = async () => {
+							var missing = Diz.DizWorkspaceLoader.ComputeMissingCdlFunctionLabels();
+							if(missing.Count == 0) {
+								await MessageBox.Show(wnd, "All CDL-identified functions already have labels.", "Generate CDL Function Labels", MessageBoxButtons.OK, MessageBoxIcon.Info);
+								return;
+							}
+							string q = $"{missing.Count} CDL function{(missing.Count == 1 ? "" : "s")} {(missing.Count == 1 ? "has" : "have")} no label. Create sub_XXXXXX labels now?";
+							var r = await MessageBox.Show(wnd, q, "Generate CDL Function Labels", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+							if(r == DialogResult.Yes) {
+								Diz.DizWorkspaceLoader.CreateCdlFunctionLabels(missing);
+								await MessageBox.Show(wnd, $"Created {missing.Count} label{(missing.Count == 1 ? "" : "s")}.", "Generate CDL Function Labels", MessageBoxButtons.OK, MessageBoxIcon.Info);
+							}
+						}
+					},
+					new ContextMenuAction() {
 						ActionType = ActionType.ExportAsm,
 						IsVisible = () => DebugApi.GetMemorySize(MemoryType.SnesPrgRom) > 0,
 						IsEnabled = () => DebugApi.GetMemorySize(MemoryType.SnesPrgRom) > 0,
@@ -916,9 +940,19 @@ namespace Mesen.Debugger.ViewModels
 						IsVisible = () => DebugApi.GetMemorySize(MemoryType.SnesPrgRom) > 0,
 						OnClick = async () => {
 							string? filename = await FileDialogHelper.OpenFile(null, wnd, FileDialogHelper.DizExt, FileDialogHelper.DizRawExt);
-							if(filename != null) {
-								DebugWorkspaceManager.LoadSupportedFile(filename, true);
+							if(filename == null) return;
+
+							bool overwrite = true;
+							if(LabelManager.GetAllLabels().Any()) {
+								var r = await MessageBox.Show(wnd,
+									"Existing labels were found.\n\nYes = Overwrite all existing labels with data from the file.\nNo = Only import labels that do not already exist.",
+									"Import DiztinGUIsh Project",
+									MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+								if(r == DialogResult.Cancel) return;
+								overwrite = r == DialogResult.Yes;
 							}
+
+							DebugWorkspaceManager.LoadDizFile(filename, true, overwrite, wnd);
 						}
 					},
 					new ContextMenuAction() {

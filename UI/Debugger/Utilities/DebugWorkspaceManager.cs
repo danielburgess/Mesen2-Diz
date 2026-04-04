@@ -1,4 +1,5 @@
-﻿using Mesen.Config;
+﻿using Avalonia.Controls;
+using Mesen.Config;
 using Mesen.Debugger.Integration;
 using Mesen.Debugger.Labels;
 using Mesen.Interop;
@@ -218,12 +219,14 @@ namespace Mesen.Debugger.Utilities
 			}
 		}
 
-		public static void LoadDizFile(string path, bool showResult)
+		public static void LoadDizFile(string path, bool showResult, bool overwriteExisting = true, Window? owner = null)
 		{
 			string ext = Path.GetExtension(path).ToLower();
 			if(File.Exists(path) && (ext == "." + FileDialogHelper.DizExt || ext == "." + FileDialogHelper.DizRawExt)) {
-				ResetLabels();
-				Diz.DizWorkspaceLoader.LoadFile(path, showResult);
+				if(overwriteExisting) {
+					ResetLabels();
+				}
+				Diz.DizWorkspaceLoader.LoadFile(path, showResult, overwriteExisting, owner);
 			}
 		}
 

@@ -45,6 +45,30 @@
 			ColumnWidths="{Binding ColumnWidths}"
 		>
 			<DataBox.Columns>
+				<DataBoxTemplateColumn ColumnName="AiModified" Header="AI" InitialWidth="18" CanUserResize="False" CanUserSort="True">
+					<DataTemplate>
+						<Ellipse
+							x:DataType="vm:LabelViewModel"
+							Width="8" Height="8"
+							HorizontalAlignment="Center" VerticalAlignment="Center"
+							Fill="#22CC44"
+							IsVisible="{Binding IsAiModified}"
+							ToolTip.Tip="Added or updated by AI this session"
+						/>
+					</DataTemplate>
+				</DataBoxTemplateColumn>
+				<DataBoxTemplateColumn ColumnName="Category" Header="{l:Translate colCategory}" InitialWidth="80" CanUserResize="True" CanUserSort="True">
+					<DataTemplate>
+						<TextBlock
+							x:DataType="vm:LabelViewModel"
+							Text="{Binding CategoryDisplay}"
+							Foreground="{Binding CategoryColor}"
+							FontSize="10"
+							VerticalAlignment="Center"
+							Margin="3,0"
+						/>
+					</DataTemplate>
+				</DataBoxTemplateColumn>
 				<DataBoxEditableTextColumn ColumnName="Label" Header="{l:Translate colLabel}" Binding="{Binding LabelText, DataType={x:Type vm:LabelViewModel}}" CanUserResize="True" InitialWidth="100" />
 				<DataBoxTextColumn ColumnName="RelAddr" Header="{l:Translate colCpuAddr}" Binding="{Binding RelAddressDisplay, DataType={x:Type vm:LabelViewModel}}" CanUserResize="True" InitialWidth="80" />
 				<DataBoxTextColumn ColumnName="AbsAddr" Header="{l:Translate colRomAddr}" Binding="{Binding AbsAddressDisplay, DataType={x:Type vm:LabelViewModel}}" CanUserResize="True" InitialWidth="80" />

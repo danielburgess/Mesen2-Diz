@@ -23,6 +23,15 @@ namespace Mesen.Debugger.Labels
 		private static HashSet<CodeLabel> _labels = new HashSet<CodeLabel>();
 		private static Dictionary<string, CodeLabel> _reverseLookup = new Dictionary<string, CodeLabel>();
 
+		/// <summary>Session-only set of label keys modified by the AI companion. Cleared on reset, not persisted.</summary>
+		private static HashSet<UInt64> _aiModifiedKeys = new HashSet<UInt64>();
+
+		public static void MarkAsAiModified(uint address, MemoryType memType) =>
+			_aiModifiedKeys.Add(GetKey(address, memType));
+
+		public static bool IsAiModified(uint address, MemoryType memType) =>
+			_aiModifiedKeys.Contains(GetKey(address, memType));
+
 		public static event EventHandler? OnLabelUpdated;
 
 		private static int _suspendEvents = 0;

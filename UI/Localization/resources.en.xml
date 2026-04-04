@@ -1337,12 +1337,14 @@
 
 		<Form ID="FunctionListView">
 			<Control ID="colFunction">Function</Control>
+			<Control ID="colCategory">Category</Control>
 			<Control ID="colCpuAddr">CPU Addr</Control>
 			<Control ID="colRomAddr">ROM Addr</Control>
 		</Form>
 
 		<Form ID="LabelListView">
 			<Control ID="colLabel">Label</Control>
+			<Control ID="colCategory">Category</Control>
 			<Control ID="colCpuAddr">CPU Addr</Control>
 			<Control ID="colRomAddr">ROM Addr</Control>
 			<Control ID="colComment">Comment</Control>
@@ -1695,6 +1697,7 @@
 			<Control ID="lblMemoryType">Memory type:</Control>
 			<Control ID="lblAddress">Address:</Control>
 			<Control ID="lblLabel">Label:</Control>
+			<Control ID="lblCategory">Category:</Control>
 			<Control ID="lblComment">Comment:</Control>
 			<Control ID="lblLength">Length:</Control>
 			<Control ID="lblBytes">bytes</Control>
@@ -3672,6 +3675,7 @@ E
 			<Value ID="ExportAsm">Export ASM (.asm)...</Value>
 			<Value ID="ExportAsmSplit">Export ASM (split by bank)...</Value>
 			<Value ID="GenerateBranchLabels">Generate branch labels...</Value>
+			<Value ID="GenerateCdlFunctionLabels">Generate CDL function labels...</Value>
 			<Value ID="ImportWatchEntries">Import watch entries...</Value>
 			<Value ID="ExportWatchEntries">Export watch entries...</Value>
 
@@ -3738,6 +3742,58 @@ E
 
 			<Value ID="CopyToClipboard">Copy to clipboard</Value>
 			<Value ID="ResetProfilerData">Reset profiler data</Value>
+		</Enum>
+		<Enum ID="AiMode">
+			<Value ID="Default">Default</Value>
+			<Value ID="Explorer">Explorer</Value>
+			<Value ID="Annotation">Annotation</Value>
+		</Enum>
+		<Enum ID="AiProvider">
+			<Value ID="Claude">Claude</Value>
+			<Value ID="OpenAiCompatible">OpenAI-Compatible</Value>
+		</Enum>
+		<Enum ID="FunctionCategory">
+			<Value ID="None">None</Value>
+			<Value ID="Init">Init</Value>
+			<Value ID="MainLoop">Main Loop</Value>
+			<Value ID="Interrupt">Interrupt</Value>
+			<Value ID="DMA">DMA</Value>
+			<Value ID="Input">Input</Value>
+			<Value ID="Player">Player</Value>
+			<Value ID="OAM">OAM</Value>
+			<Value ID="VRAM">VRAM</Value>
+			<Value ID="Tilemap">Tilemap</Value>
+			<Value ID="Palette">Palette</Value>
+			<Value ID="Scrolling">Scrolling</Value>
+			<Value ID="Animation">Animation</Value>
+			<Value ID="Effects">Effects</Value>
+			<Value ID="Mode7">Mode 7</Value>
+			<Value ID="Music">Music</Value>
+			<Value ID="SFX">SFX</Value>
+			<Value ID="Physics">Physics</Value>
+			<Value ID="Collision">Collision</Value>
+			<Value ID="Entity">Entity</Value>
+			<Value ID="Enemy">Enemy</Value>
+			<Value ID="AI">AI</Value>
+			<Value ID="Camera">Camera</Value>
+			<Value ID="StateMachine">State Machine</Value>
+			<Value ID="GameState">Game State</Value>
+			<Value ID="Menu">Menu</Value>
+			<Value ID="HUD">HUD</Value>
+			<Value ID="LevelLoad">Level Load</Value>
+			<Value ID="Transition">Transition</Value>
+			<Value ID="Script">Script</Value>
+			<Value ID="Dialogue">Dialogue</Value>
+			<Value ID="Math">Math</Value>
+			<Value ID="RNG">RNG</Value>
+			<Value ID="Timer">Timer</Value>
+			<Value ID="Memory">Memory</Value>
+			<Value ID="Text">Text</Value>
+			<Value ID="Save">Save</Value>
+			<Value ID="Debug">Debug</Value>
+			<Value ID="Unused">Unused</Value>
+			<Value ID="Unknown">Unknown</Value>
+			<Value ID="Helper">Helper</Value>
 		</Enum>
 	</Enums>
 </Resources>

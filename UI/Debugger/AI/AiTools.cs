@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 using Avalonia.Threading;
+using Mesen.Config;
 using Mesen.Debugger;
 using Mesen.Debugger.Labels;
 using Mesen.Debugger.Utilities;
@@ -96,30 +97,32 @@ namespace Mesen.Debugger.AI
 				}, new[] { "rom_offset", "length" })),
 
 			Tool("get_labels",
-				"Get current labels. Optionally filter by name substring, prefix, and/or SNES CPU address range. All filters are combined (AND). Returns address, memory_type, name, and comment for each match.",
+				"Get current labels. Optionally filter by name substring, prefix, category, and/or SNES CPU address range. All filters are combined (AND). Returns address, memory type, name, comment, and category for each match.",
 				Schema("", new() {
 					["filter"]      = Prop("string", "Optional substring to match against label names (case-insensitive)."),
 					["prefix"]      = Prop("string", "Optional prefix to match against label names (case-insensitive)."),
 					["addr_from"]   = Prop("string", "Optional start of SNES CPU address range (hex, inclusive)."),
-					["addr_to"]     = Prop("string", "Optional end of SNES CPU address range (hex, inclusive).")
+					["addr_to"]     = Prop("string", "Optional end of SNES CPU address range (hex, inclusive)."),
+					["category"]    = Prop("string", "Optional category name to filter by (e.g. \"Player\", \"Collision\"). Case-insensitive.")
 				}, new string[0])),
 
 			Tool("get_label_at",
-				"Get the label and comment at a specific SNES CPU address, if any.",
+				"Get the label, comment, and category at a specific SNES CPU address, if any.",
 				Schema("", new() {
 					["address"] = Prop("string", "SNES CPU address as hex string")
 				}, new[] { "address" })),
 
 			Tool("set_label",
-				"Set a label name and/or comment at a SNES CPU address. Overwrites any existing label at that address.",
+				"Set a label name, comment, and/or category at a SNES CPU address. Overwrites any existing label at that address.",
 				Schema("", new() {
-					["address"] = Prop("string", "SNES CPU address as hex string"),
-					["name"] = Prop("string", "Label name (alphanumeric + underscore + @, max 100 chars). Empty string to keep existing name."),
-					["comment"] = Prop("string", "Comment text. Empty string to clear comment.")
+					["address"]  = Prop("string", "SNES CPU address as hex string"),
+					["name"]     = Prop("string", "Label name (alphanumeric + underscore + @, max 100 chars). Empty string to keep existing name."),
+					["comment"]  = Prop("string", "Comment text. Empty string to clear comment."),
+					["category"] = Prop("string", "Optional category (e.g. \"Player\", \"Collision\", \"None\"). Omit to keep existing.")
 				}, new[] { "address", "name" })),
 
 			Tool("set_labels",
-				"Set multiple label names and/or comments in one call. Each entry is an object with \"address\", \"name\", and \"comment\" fields (same rules as set_label). " +
+				"Set multiple labels in one call. Each entry may include \"address\", \"name\", \"comment\", and optional \"category\". " +
 				"Prefer this over repeated set_label calls when annotating many addresses at once.",
 				new JsonObject {
 					["type"] = "object",
@@ -130,9 +133,10 @@ namespace Mesen.Debugger.AI
 							["items"] = new JsonObject {
 								["type"] = "object",
 								["properties"] = new JsonObject {
-									["address"] = Prop("string", "SNES CPU address as hex string"),
-									["name"]    = Prop("string", "Label name. Empty string to keep existing name."),
-									["comment"] = Prop("string", "Comment text. Empty string to clear comment.")
+									["address"]  = Prop("string", "SNES CPU address as hex string"),
+									["name"]     = Prop("string", "Label name. Empty string to keep existing name."),
+									["comment"]  = Prop("string", "Comment text. Empty string to clear comment."),
+									["category"] = Prop("string", "Optional category name (e.g. \"Player\", \"None\").")
 								},
 								["required"] = new JsonArray("address", "name")
 							}
@@ -141,11 +145,31 @@ namespace Mesen.Debugger.AI
 					["required"] = new JsonArray("labels")
 				}),
 
+			Tool("get_functions_by_category",
+				"Get all labeled functions that belong to a specific category.",
+				Schema("", new() {
+					["category"] = Prop("string", "Category name (e.g. \"Collision\", \"Player\", \"AI\"). Case-insensitive.")
+				}, new[] { "category" })),
+
 			Tool("delete_label",
 				"Delete the label at a SNES CPU address.",
 				Schema("", new() {
 					["address"] = Prop("string", "SNES CPU address as hex string")
 				}, new[] { "address" })),
+
+			Tool("delete_labels",
+				"Delete multiple labels in one call. Prefer this over repeated delete_label calls.",
+				new JsonObject {
+					["type"] = "object",
+					["properties"] = new JsonObject {
+						["addresses"] = new JsonObject {
+							["type"] = "array",
+							["description"] = "Array of SNES CPU addresses (hex strings) whose labels should be deleted.",
+							["items"] = Prop("string", "SNES CPU address as hex string")
+						}
+					},
+					["required"] = new JsonArray("addresses")
+				}),
 
 			Tool("get_call_stack",
 				"Get the current CPU call stack showing active subroutine chain.",
@@ -416,6 +440,10 @@ namespace Mesen.Debugger.AI
 			"Call this after finishing breakpoint analysis to check whether additional breaks hit during processing. " +
 			"The queue is cleared once read. Returns an empty result if no breaks are queued.",
 			new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() }),
+
+		Tool("list_categories",
+			"List all available function categories with their names and one-line descriptions. Use this as a quick reference when deciding which category to assign.",
+			new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() }),
 		};
 
 		// ── Tool executor ─────────────────────────────────────────────────────
@@ -439,7 +467,9 @@ namespace Mesen.Debugger.AI
 					"get_label_at"            => DoGetLabelAt(input),
 					"set_label"               => DoSetLabel(input),
 					"set_labels"              => DoSetLabels(input),
+					"get_functions_by_category" => DoGetFunctionsByCategory(input),
 					"delete_label"            => DoDeleteLabel(input),
+					"delete_labels"           => DoDeleteLabels(input),
 					"get_call_stack"          => DoGetCallStack(),
 					"get_annotation_summary"  => DoGetAnnotationSummary(),
 					"get_rom_map"             => DoGetRomMap(input),
@@ -474,6 +504,7 @@ namespace Mesen.Debugger.AI
 					"get_watches"        => DoGetWatches(),
 					"remove_watch"       => DoRemoveWatch(input),
 					"get_pending_breakpoints" => DoGetPendingBreakpoints(),
+				"list_categories"         => DoListCategories(),
 					_ => $"Unknown tool: {name}"
 				};
 				// Append current CPU state + PC disassembly to every response except get_cpu_state
@@ -577,10 +608,11 @@ namespace Mesen.Debugger.AI
 
 		private string DoGetLabels(JsonObject input)
 		{
-			string filter   = input["filter"]?.GetValue<string>()   ?? "";
-			string prefix   = input["prefix"]?.GetValue<string>()   ?? "";
-			string addrFrom = input["addr_from"]?.GetValue<string>() ?? "";
-			string addrTo   = input["addr_to"]?.GetValue<string>()   ?? "";
+			string filter      = input["filter"]?.GetValue<string>()    ?? "";
+			string prefix      = input["prefix"]?.GetValue<string>()    ?? "";
+			string addrFrom    = input["addr_from"]?.GetValue<string>() ?? "";
+			string addrTo      = input["addr_to"]?.GetValue<string>()   ?? "";
+			string categoryStr = input["category"]?.GetValue<string>()  ?? "";
 
 			var labels = LabelManager.GetAllLabels();
 			if(labels.Count == 0) return "No labels defined.";
@@ -598,6 +630,8 @@ namespace Mesen.Debugger.AI
 				uint to = ParseAddress(addrTo);
 				filtered = filtered.Where(l => l.Address <= to);
 			}
+			if(categoryStr.Length > 0 && Enum.TryParse<FunctionCategory>(categoryStr, ignoreCase: true, out var catFilter))
+				filtered = filtered.Where(l => l.Category == catFilter);
 
 			var matches = filtered.OrderBy(l => l.Address).ToList();
 			if(matches.Count == 0) return "No labels matched.";
@@ -605,8 +639,9 @@ namespace Mesen.Debugger.AI
 			var sb = new StringBuilder();
 			sb.AppendLine($"{matches.Count} label(s):");
 			foreach(var lbl in matches) {
-				string comment = lbl.Comment.Length > 0 ? $"  ; {lbl.Comment}" : "";
-				sb.AppendLine($"  {lbl.MemoryType}:${lbl.Address:X6}  {lbl.Label}{comment}");
+				string comment  = lbl.Comment.Length > 0 ? $"  ; {lbl.Comment}" : "";
+				string category = lbl.Category != FunctionCategory.None ? $"  [{lbl.Category}]" : "";
+				sb.AppendLine($"  {lbl.MemoryType}:${lbl.Address:X6}  {lbl.Label}{category}{comment}");
 			}
 			return sb.ToString();
 		}
@@ -618,14 +653,22 @@ namespace Mesen.Debugger.AI
 			var label = LabelManager.GetLabel(absAddr);
 			if(label == null)
 				return $"No label at ${addr:X6} (ROM offset ${absAddr.Address:X6}).";
-			return $"Address: ${addr:X6} (ROM ${absAddr.Address:X6})\nName: {label.Label}\nComment: {label.Comment}";
+			string catLine = label.Category != FunctionCategory.None ? $"\nCategory: {label.Category}" : "";
+			return $"Address: ${addr:X6} (ROM ${absAddr.Address:X6})\nName: {label.Label}{catLine}\nComment: {label.Comment}";
+		}
+
+		private static FunctionCategory ParseCategory(string? raw, FunctionCategory fallback)
+		{
+			if(string.IsNullOrEmpty(raw)) return fallback;
+			return Enum.TryParse<FunctionCategory>(raw, ignoreCase: true, out var cat) ? cat : fallback;
 		}
 
 		private string DoSetLabel(JsonObject input)
 		{
 			uint addr = ParseAddress(input["address"]?.GetValue<string>() ?? "0");
-			string name = input["name"]?.GetValue<string>() ?? "";
-			string comment = input["comment"]?.GetValue<string>() ?? "";
+			string name    = input["name"]?.GetValue<string>()     ?? "";
+			string comment = input["comment"]?.GetValue<string>()  ?? "";
+			string catStr  = input["category"]?.GetValue<string>() ?? "";
 
 			if(!string.IsNullOrEmpty(name) && !LabelManager.LabelRegex.IsMatch(name))
 				return $"Invalid label name '{name}'. Use only letters, digits, underscore, @.";
@@ -634,21 +677,24 @@ namespace Mesen.Debugger.AI
 			if(absAddr.Type == MemoryType.None || absAddr.Address < 0)
 				return $"Address ${addr:X6} does not map to ROM.";
 
-			// If name is empty, keep existing name
-			if(string.IsNullOrEmpty(name)) {
-				var existing = LabelManager.GetLabel(absAddr);
+			var existing = LabelManager.GetLabel(absAddr);
+			if(string.IsNullOrEmpty(name))
 				name = existing?.Label ?? "";
-			}
+
+			FunctionCategory category = ParseCategory(catStr, existing?.Category ?? FunctionCategory.None);
 
 			LabelManager.SetLabel(new CodeLabel {
-				Address = (uint)absAddr.Address,
+				Address    = (uint)absAddr.Address,
 				MemoryType = absAddr.Type,
-				Label = name,
-				Comment = comment,
-				Length = 1
+				Label      = name,
+				Comment    = comment,
+				Length     = 1,
+				Category   = category
 			}, raiseEvent: true);
+			LabelManager.MarkAsAiModified((uint)absAddr.Address, absAddr.Type);
 			DebugWorkspaceManager.AutoSave();
-			return $"Label set: ${addr:X6} → name='{name}' comment='{comment}'";
+			string catPart = category != FunctionCategory.None ? $" category='{category}'" : "";
+			return $"Label set: ${addr:X6} → name='{name}'{catPart} comment='{comment}'";
 		}
 
 		private string DoSetLabels(JsonObject input)
@@ -661,9 +707,10 @@ namespace Mesen.Debugger.AI
 
 			foreach(var node in arr) {
 				if(node is not JsonObject entry) continue;
-				string addrStr  = entry["address"]?.GetValue<string>() ?? "";
-				string name     = entry["name"]?.GetValue<string>() ?? "";
-				string comment  = entry["comment"]?.GetValue<string>() ?? "";
+				string addrStr  = entry["address"]?.GetValue<string>()  ?? "";
+				string name     = entry["name"]?.GetValue<string>()     ?? "";
+				string comment  = entry["comment"]?.GetValue<string>()  ?? "";
+				string catStr   = entry["category"]?.GetValue<string>() ?? "";
 
 				if(addrStr.Length == 0) { errors.Add("entry missing address"); continue; }
 
@@ -681,17 +728,21 @@ namespace Mesen.Debugger.AI
 					continue;
 				}
 
-				if(string.IsNullOrEmpty(name)) {
-					name = LabelManager.GetLabel(absAddr)?.Label ?? "";
-				}
+				var existingLabel = LabelManager.GetLabel(absAddr);
+				if(string.IsNullOrEmpty(name))
+					name = existingLabel?.Label ?? "";
+
+				FunctionCategory category = ParseCategory(catStr, existingLabel?.Category ?? FunctionCategory.None);
 
 				LabelManager.SetLabel(new CodeLabel {
 					Address    = (uint)absAddr.Address,
 					MemoryType = absAddr.Type,
 					Label      = name,
 					Comment    = comment,
-					Length     = 1
+					Length     = 1,
+					Category   = category
 				}, raiseEvent: true);
+				LabelManager.MarkAsAiModified((uint)absAddr.Address, absAddr.Type);
 				set++;
 			}
 
@@ -710,6 +761,108 @@ namespace Mesen.Debugger.AI
 			LabelManager.DeleteLabel(label, raiseEvent: true);
 			DebugWorkspaceManager.AutoSave();
 			return $"Deleted label '{label.Label}' at ${addr:X6}.";
+		}
+
+		private string DoDeleteLabels(JsonObject input)
+		{
+			var addresses = input["addresses"] as JsonArray;
+			if(addresses == null || addresses.Count == 0) return "No addresses provided.";
+
+			var toDelete = new List<CodeLabel>();
+			var notFound = new List<string>();
+
+			foreach(var item in addresses) {
+				string addrStr = item?.GetValue<string>() ?? "";
+				uint addr = ParseAddress(addrStr);
+				var absAddr = DebugApi.GetAbsoluteAddress(new AddressInfo { Address = (int)addr, Type = _cpuMemType });
+				var label = LabelManager.GetLabel(absAddr);
+				if(label == null) {
+					notFound.Add($"${addr:X6}");
+				} else {
+					toDelete.Add(label);
+				}
+			}
+
+			if(toDelete.Count > 0) {
+				LabelManager.DeleteLabels(toDelete);
+				DebugWorkspaceManager.AutoSave();
+			}
+
+			string result = $"Deleted {toDelete.Count} label(s).";
+			if(notFound.Count > 0) result += $" Not found: {string.Join(", ", notFound)}.";
+			return result;
+		}
+
+		private static string DoListCategories()
+		{
+			return
+@"Available function categories (use exact name in set_label / set_labels / get_functions_by_category):
+
+IMPORTANT: You must always assign a category. None means untouched — never set it yourself.
+
+Init         — One-time hardware/system setup: RESET handler, VRAM/DMA init
+MainLoop     — Top-level game loop, frame dispatch
+Interrupt    — NMI, IRQ, BRK handlers
+DMA          — DMA transfer routines specifically
+Input        — Controller reading, button state tracking
+Player       — Player movement, state, health, inventory
+OAM          — Sprite/OAM buffer management
+VRAM         — Tile/graphics uploads to VRAM
+Tilemap      — BG tilemap writes and updates
+Palette      — Color/palette management
+Scrolling    — Scroll register updates, parallax
+Animation    — Animation frame sequencing and timers
+Effects      — Visual effects: fades, flashes, screen wipes
+Mode7        — Mode 7 math, matrix setup
+Music        — BGM playback, SPC communication
+SFX          — Sound effect triggers
+Physics      — Velocity, gravity, movement integration
+Collision    — Hit detection and response
+Entity       — Generic object/entity lifecycle: spawn, update, despawn
+Enemy        — Enemy-specific behavior
+AI           — Pathfinding, decision-making, targeting
+Camera       — Viewport tracking, scroll bounds
+StateMachine — State variable management, mode dispatch tables
+GameState    — High-level game mode: title, gameplay, gameover, cutscene
+Menu         — Menu navigation and selection logic
+HUD          — On-screen display: score, health bars, counters
+LevelLoad    — Map/room/level loading and setup
+Transition   — Screen transitions, room changes
+Script       — Script/event interpreter: bytecode VM, event queue, cutscene sequencing
+Dialogue     — Text box lifecycle: window drawing, letter-by-letter print, prompts
+Math         — Arithmetic, trig tables, fixed-point math
+RNG          — Random number generation
+Timer        — Frame counters, countdown timers
+Memory       — Memory copy, fill, compression
+Text         — Low-level font/string rendering utilities
+Save         — SRAM read/write, save data management
+Debug        — Developer test code, leftover debug menus
+Unused       — Dead code, unreachable, cut content
+Unknown      — Analyzed but purpose not yet determined; needs further investigation
+Helper       — Small utility/helper that serves other systems; no direct game-system role
+None         — RESERVED: means this label has never been touched. Never assign this yourself.";
+		}
+
+		private string DoGetFunctionsByCategory(JsonObject input)
+		{
+			string catStr = input["category"]?.GetValue<string>() ?? "";
+			if(!Enum.TryParse<FunctionCategory>(catStr, ignoreCase: true, out var category))
+				return $"Unknown category '{catStr}'. Valid values: {string.Join(", ", Enum.GetNames<FunctionCategory>())}";
+
+			var matches = LabelManager.GetAllLabels()
+				.Where(l => l.Category == category)
+				.OrderBy(l => l.Address)
+				.ToList();
+
+			if(matches.Count == 0) return $"No labels with category '{category}'.";
+
+			var sb = new StringBuilder();
+			sb.AppendLine($"{matches.Count} label(s) in [{category}]:");
+			foreach(var lbl in matches) {
+				string comment = lbl.Comment.Length > 0 ? $"  ; {lbl.Comment}" : "";
+				sb.AppendLine($"  {lbl.MemoryType}:${lbl.Address:X6}  {lbl.Label}{comment}");
+			}
+			return sb.ToString();
 		}
 
 		private string DoGetCallStack()
@@ -773,7 +926,9 @@ namespace Mesen.Debugger.AI
 			string summary = name switch {
 				"set_labels" => ExtractSetLabelsSummary(result),
 				"set_label"  => ExtractSetLabelSummary(input, result),
-				"delete_label" => $"Deleted label at {input["address"]?.GetValue<string>() ?? "?"}",
+				"delete_label"  => $"Deleted label at {input["address"]?.GetValue<string>() ?? "?"}",
+				"delete_labels" => $"Deleted {(input["addresses"] as JsonArray)?.Count ?? 0} label(s)",
+				"get_functions_by_category" => $"Fetched [{input["category"]?.GetValue<string>() ?? "?"}] functions",
 				"set_breakpoint" => $"Set breakpoint at {input["address"]?.GetValue<string>() ?? "?"}" +
 				                    (input["break_on"] != null ? $" [{input["break_on"]!.GetValue<string>()}]" : ""),
 				"remove_breakpoint" => $"Removed breakpoint at {input["address"]?.GetValue<string>() ?? "?"}",
@@ -812,6 +967,7 @@ namespace Mesen.Debugger.AI
 				"list_breakpoints"   => "Listed breakpoints",
 				"get_watches"        => "Fetched watches",
 				"get_pending_breakpoints" => "Drained pending breakpoint queue",
+				"list_categories"         => "Listed function categories",
 				_ => name
 			};
 

@@ -48,9 +48,11 @@ namespace Mesen.Debugger.ViewModels
 		}
 
 		private Dictionary<string, Func<FunctionViewModel, FunctionViewModel, int>> _comparers = new() {
-			{ "Function", (a, b) => string.Compare(a.LabelName, b.LabelName, StringComparison.OrdinalIgnoreCase) },
-			{ "RelAddr", (a, b) => a.RelAddress.CompareTo(b.RelAddress) },
-			{ "AbsAddr", (a, b) => a.AbsAddress.CompareTo(b.AbsAddress) },
+			{ "AiModified", (a, b) => a.IsAiModified.CompareTo(b.IsAiModified) },
+			{ "Category",   (a, b) => (a.Label?.Category ?? FunctionCategory.None).CompareTo(b.Label?.Category ?? FunctionCategory.None) },
+			{ "Function",   (a, b) => string.Compare(a.LabelName, b.LabelName, StringComparison.OrdinalIgnoreCase) },
+			{ "RelAddr",    (a, b) => a.RelAddress.CompareTo(b.RelAddress) },
+			{ "AbsAddr",    (a, b) => a.AbsAddress.CompareTo(b.AbsAddress) },
 		};
 
 		public void UpdateFunctionList()
@@ -154,6 +156,9 @@ namespace Mesen.Debugger.ViewModels
 
 		public CodeLabel? Label => LabelManager.GetLabel(FuncAddr);
 		public string LabelName => Label?.Label ?? "<no label>";
+		public bool IsAiModified => Label != null && LabelManager.IsAiModified(Label.Address, Label.MemoryType);
+		public IBrush CategoryColor => FunctionCategoryInfo.GetBrush(Label?.Category ?? FunctionCategory.None);
+		public string CategoryDisplay => FunctionCategoryInfo.GetDisplay(Label?.Category ?? FunctionCategory.None);
 
 		public event PropertyChangedEventHandler? PropertyChanged;
 
