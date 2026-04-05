@@ -3747,6 +3747,7 @@ E
 			<Value ID="Default">Default</Value>
 			<Value ID="Explorer">Explorer</Value>
 			<Value ID="Annotation">Annotation</Value>
+			<Value ID="Historian">Historian</Value>
 		</Enum>
 		<Enum ID="AiProvider">
 			<Value ID="Claude">Claude</Value>

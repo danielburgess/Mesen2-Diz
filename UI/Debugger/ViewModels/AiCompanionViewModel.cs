@@ -153,6 +153,7 @@ namespace Mesen.Debugger.ViewModels
 					string modeLabel = t.mode switch {
 						AiMode.Explorer   => " · Explorer",
 						AiMode.Annotation => " · Annotation",
+						AiMode.Historian  => " · Historian",
 						_                 => ""
 					};
 					ProviderModelDisplay = $"{providerLabel} · {t.m}{modeLabel}";
@@ -1065,6 +1066,7 @@ After the user acts, call get_rom_map again to see new CDL coverage, then annota
 			string modePrompt = Config.ActiveMode switch {
 				AiMode.Explorer   => Config.ExplorerModePrompt,
 				AiMode.Annotation => Config.AnnotationModePrompt,
+				AiMode.Historian  => Config.HistorianModePrompt,
 				_                 => ""
 			};
 			if(!string.IsNullOrWhiteSpace(modePrompt))

@@ -380,9 +380,21 @@
 									FontFamily="{DynamicResource MesenMonospaceFont}"
 									ToolTip.Tip="System prompt addendum used when Annotation mode is active. Changes take effect on the next message." />
 
+								<TextBlock FontSize="11" FontWeight="SemiBold" Margin="0,10,0,2" Text="Historian Mode Prompt" />
+								<TextBlock FontSize="10" Foreground="{StaticResource MesenTextMutedColor}" Margin="0,0,0,3" TextWrapping="Wrap"
+									Text="Instructs the AI to answer questions about game code using existing labels, comments, categories, and live CPU state." />
+								<TextBox
+									Text="{Binding AiConfig.HistorianModePrompt}"
+									FontSize="11" Padding="4"
+									AcceptsReturn="True" TextWrapping="Wrap"
+									MinHeight="120" MaxHeight="300"
+									ScrollViewer.VerticalScrollBarVisibility="Auto"
+									FontFamily="{DynamicResource MesenMonospaceFont}"
+									ToolTip.Tip="System prompt addendum used when Historian mode is active. Changes take effect on the next message." />
+
 								<Button Margin="0,8,0,0" Padding="6,3" FontSize="11"
 									Click="OnResetModePromptsClick"
-									ToolTip.Tip="Restore both mode prompts to their built-in defaults">
+									ToolTip.Tip="Restore all mode prompts to their built-in defaults">
 									<TextBlock Text="Reset to defaults" FontSize="11" />
 								</Button>
 							</StackPanel>

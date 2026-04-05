@@ -69,6 +69,7 @@ namespace Mesen.Debugger.Windows
 		{
 			_model.AiConfig.ExplorerModePrompt = AiModeDefaults.ExplorerPrompt;
 			_model.AiConfig.AnnotationModePrompt = AiModeDefaults.AnnotationPrompt;
+			_model.AiConfig.HistorianModePrompt = AiModeDefaults.HistorianPrompt;
 		}
 
 		protected override void OnKeyDown(KeyEventArgs e)
