@@ -92,6 +92,10 @@ namespace Mesen.Config
 
 		[Reactive] public bool InlineLabelEditEnabled { get; set; } = true;
 
+		[Reactive] public bool AutoDumpRamOnPause { get; set; } = false;
+		[Reactive] public string RamDumpFolder { get; set; } = "";
+		public Dictionary<string, string> RamDumpFolderOverrides { get; set; } = new();
+
 		[Reactive] public List<int> LabelListColumnWidths { get; set; } = new();
 		[Reactive] public List<int> FunctionListColumnWidths { get; set; } = new();
 		[Reactive] public List<int> BreakpointListColumnWidths { get; set; } = new();

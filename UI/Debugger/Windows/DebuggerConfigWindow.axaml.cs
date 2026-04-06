@@ -12,6 +12,7 @@ using Mesen.Utilities;
 using Avalonia.Rendering;
 using Mesen.Windows;
 using Avalonia.Input;
+using System.Threading.Tasks;
 
 namespace Mesen.Debugger.Windows
 {
@@ -63,6 +64,22 @@ namespace Mesen.Debugger.Windows
 			_promptToSave = false;
 			_model.RevertChanges();
 			Close();
+		}
+
+		private async void OnBrowseRamDumpFolderClick(object sender, RoutedEventArgs e)
+		{
+			string? folder = await FileDialogHelper.OpenFolder(this);
+			if(folder != null) {
+				_model.Debugger.RamDumpFolder = folder;
+			}
+		}
+
+		private async void OnBrowseRamDumpOverrideFolderClick(object sender, RoutedEventArgs e)
+		{
+			string? folder = await FileDialogHelper.OpenFolder(this);
+			if(folder != null) {
+				_model.RamDumpRomOverrideFolder = folder;
+			}
 		}
 
 		private void OnResetModePromptsClick(object sender, RoutedEventArgs e)

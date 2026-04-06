@@ -131,6 +131,7 @@ namespace Mesen.Debugger.Windows
 			switch(e.NotificationType) {
 				case ConsoleNotificationType.CodeBreak:
 					BreakEvent evt = Marshal.PtrToStructure<BreakEvent>(e.Parameter);
+					RamDumper.DumpIfEnabled(_model.CpuType);
 					Dispatcher.UIThread.Post(() => {
 						BreakpointManager.ClearTemporaryBreakpoints();
 

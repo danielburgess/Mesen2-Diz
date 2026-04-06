@@ -1531,6 +1531,15 @@
 			<Control ID="chkCopyComments">Copy comments</Control>
 			<Control ID="chkCopyBlockHeaders">Copy block headers</Control>
 
+			<Control ID="lblRamDumpSettings">RAM dump on pause</Control>
+			<Control ID="chkAutoDumpRamOnPause">Automatically dump RAM sections to files when emulation pauses</Control>
+			<Control ID="lblRamDumpDefaultFolder">Default folder:</Control>
+			<Control ID="lblRamDumpFolderPlaceholder">Select default output folder...</Control>
+			<Control ID="lblRamDumpFolderTooltip">Default folder where RAM dump files will be written (named romname_wram.dmp, etc.)</Control>
+			<Control ID="lblRamDumpOverridePlaceholder">Leave empty to use default folder</Control>
+			<Control ID="lblRamDumpOverrideTooltip">Override the dump folder for this ROM only. Leave empty to use the default folder.</Control>
+			<Control ID="btnBrowse">Browse...</Control>
+
 			<Control ID="tabScriptWindow">Script Window</Control>
 			<Control ID="lblScriptStartupBehavior">When a script window is opened: </Control>
 			<Control ID="chkSaveScriptBeforeRun">Auto-save changes before running script</Control>

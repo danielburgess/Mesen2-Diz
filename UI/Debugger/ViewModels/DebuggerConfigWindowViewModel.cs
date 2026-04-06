@@ -1,5 +1,6 @@
 ﻿using Avalonia.Controls;
 using Mesen.Config;
+using Mesen.Debugger.Utilities;
 using Mesen.Interop;
 using Mesen.Utilities;
 using Mesen.ViewModels;
@@ -22,6 +23,10 @@ namespace Mesen.Debugger.ViewModels
 		public IntegrationConfig Integration { get; set; }
 		public AiCompanionConfig AiConfig { get; set; }
 		[Reactive] public bool IsLocalAiProvider { get; private set; }
+
+		public string CurrentRomName { get; }
+		public bool HasRomLoaded => !string.IsNullOrEmpty(CurrentRomName);
+		[Reactive] public string RamDumpRomOverrideFolder { get; set; }
 
 		public List<object> CpuTypeList { get; set; } = new();
 
@@ -60,6 +65,23 @@ namespace Mesen.Debugger.ViewModels
 
 			IsLocalAiProvider = AiConfig.Provider == AiProvider.OpenAiCompatible;
 			AddDisposable(AiConfig.WhenAnyValue(x => x.Provider).Subscribe(p => IsLocalAiProvider = p == AiProvider.OpenAiCompatible));
+
+			CurrentRomName = RamDumper.GetCurrentRomName();
+			if(HasRomLoaded && Debugger.RamDumpFolderOverrides.TryGetValue(CurrentRomName, out string? existingOverride)) {
+				RamDumpRomOverrideFolder = existingOverride;
+			} else {
+				RamDumpRomOverrideFolder = "";
+			}
+
+			AddDisposable(this.WhenAnyValue(x => x.RamDumpRomOverrideFolder).Subscribe(val => {
+				if(HasRomLoaded) {
+					if(string.IsNullOrWhiteSpace(val)) {
+						Debugger.RamDumpFolderOverrides.Remove(CurrentRomName);
+					} else {
+						Debugger.RamDumpFolderOverrides[CurrentRomName] = val;
+					}
+				}
+			}));
 
 			InitShortcutLists();
 

@@ -170,6 +170,13 @@ extern "C" {
 
 	DllExport void __stdcall TakeScreenshot() { _emu->GetVideoDecoder()->TakeScreenshot(); }
 
+	DllExport void __stdcall TakeScreenshotToFile(char* filepath)
+	{
+		if(_emu->GetVideoDecoder()) {
+			_emu->GetVideoDecoder()->TakeScreenshotToFile(string(filepath));
+		}
+	}
+
 	DllExport void __stdcall ProcessAudioPlayerAction(AudioPlayerActionParams p) { _emu->ProcessAudioPlayerAction(p); }
 
 	DllExport void __stdcall GetArchiveRomList(char* filename, char* outBuffer, uint32_t maxLength) { 

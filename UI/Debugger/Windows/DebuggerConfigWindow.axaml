@@ -74,6 +74,41 @@
 							Content="{l:Translate chkCopyComments}"
 						/>
 					</c:OptionSection>
+
+					<c:OptionSection Header="{l:Translate lblRamDumpSettings}">
+						<CheckBox
+							IsChecked="{Binding Debugger.AutoDumpRamOnPause}"
+							Content="{l:Translate chkAutoDumpRamOnPause}"
+						/>
+						<TextBlock FontSize="10" Foreground="{StaticResource MesenTextMutedColor}" Margin="0,4,0,2"
+							Text="{l:Translate lblRamDumpDefaultFolder}" />
+						<Grid ColumnDefinitions="*,Auto" Margin="0,0,0,0"
+							IsEnabled="{Binding Debugger.AutoDumpRamOnPause}">
+							<TextBox Grid.Column="0"
+								Text="{Binding Debugger.RamDumpFolder}"
+								FontSize="11" Padding="3,2"
+								Watermark="{l:Translate lblRamDumpFolderPlaceholder}"
+								ToolTip.Tip="{l:Translate lblRamDumpFolderTooltip}" />
+							<Button Grid.Column="1" Margin="4,0,0,0" Padding="6,2"
+								Content="{l:Translate btnBrowse}"
+								Click="OnBrowseRamDumpFolderClick" />
+						</Grid>
+						<TextBlock FontSize="10" Foreground="{StaticResource MesenTextMutedColor}" Margin="0,6,0,2"
+							IsVisible="{Binding HasRomLoaded}"
+							Text="{Binding CurrentRomName, StringFormat='Override for: {0}'}" />
+						<Grid ColumnDefinitions="*,Auto" Margin="0,0,0,0"
+							IsVisible="{Binding HasRomLoaded}"
+							IsEnabled="{Binding Debugger.AutoDumpRamOnPause}">
+							<TextBox Grid.Column="0"
+								Text="{Binding RamDumpRomOverrideFolder}"
+								FontSize="11" Padding="3,2"
+								Watermark="{l:Translate lblRamDumpOverridePlaceholder}"
+								ToolTip.Tip="{l:Translate lblRamDumpOverrideTooltip}" />
+							<Button Grid.Column="1" Margin="4,0,0,0" Padding="6,2"
+								Content="{l:Translate btnBrowse}"
+								Click="OnBrowseRamDumpOverrideFolderClick" />
+						</Grid>
+					</c:OptionSection>
 				</StackPanel>
 			</TabItem>
 			<TabItem>
