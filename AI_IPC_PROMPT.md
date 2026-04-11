@@ -1,6 +1,6 @@
 # Mesen2-Diz Debugger IPC Interface
 
-You have access to a live SNES emulator/debugger (Mesen2-Diz) via a named pipe IPC interface. You can read/write memory, manage labels and comments, control execution, set breakpoints, read disassembly, and inspect CPU state in real time.
+You have access to a live SNES emulator/debugger (Mesen2-Diz) via a named pipe IPC interface. You can read/write memory, manage labels and comments, control execution, set breakpoints, read disassembly, inspect CPU state, load ROMs, save/load states, and inject controller input in real time.
 
 ## Connection
 
@@ -370,6 +370,121 @@ Returns: `{"running":true,"paused":true,"romLoaded":true,"romPath":"...","consol
 
 ---
 
+### Emulator Control
+
+Control ROM loading and power state remotely. All of these dispatch on a background task — if you need to guarantee the operation is complete before the next command, follow up with `getStatus` and poll.
+
+#### loadRom
+Load a ROM from an absolute file path. Optionally apply an IPS/UPS/BPS patch.
+```json
+{"command": "loadRom", "path": "/absolute/path/to/game.sfc"}
+{"command": "loadRom", "path": "/roms/game.sfc", "patchPath": "/roms/game.ips"}
+```
+
+#### reloadRom
+Reload the currently-loaded ROM from disk (picks up external edits).
+```json
+{"command": "reloadRom"}
+```
+
+#### powerCycle
+Power-cycle the console (cold boot, RAM wiped).
+```json
+{"command": "powerCycle"}
+```
+
+#### powerOff
+Stop emulation and unload the ROM.
+```json
+{"command": "powerOff"}
+```
+
+#### reset
+Soft reset the console (like pressing the reset button; RAM preserved on most systems).
+```json
+{"command": "reset"}
+```
+
+---
+
+### Save States
+
+Save states capture full emulator state for later restore. Use numbered slots for quick checkpointing, or arbitrary file paths for named snapshots.
+
+#### saveStateSlot
+Save to numbered slot. `slot` must be 1-10.
+```json
+{"command": "saveStateSlot", "slot": 1}
+```
+
+#### loadStateSlot
+Load from numbered slot.
+```json
+{"command": "loadStateSlot", "slot": 1}
+```
+
+#### saveStateFile
+Save to an absolute file path.
+```json
+{"command": "saveStateFile", "path": "/tmp/checkpoint.mss"}
+```
+
+#### loadStateFile
+Load from an absolute file path.
+```json
+{"command": "loadStateFile", "path": "/tmp/checkpoint.mss"}
+```
+
+---
+
+### Controller Input Override
+
+Inject controller input by overriding a specific port. The override **persists** in the emulator until you change it or call `clearControllerInput`. Button values are booleans — missing keys are treated as `false`. All button states in a `setControllerInput` call are applied at once (there is no partial merge; unspecified buttons are released).
+
+Valid ports: `0-7` (port 0 = controller 1, port 1 = controller 2, etc.).
+
+Button keys (all lowercase):
+- **Face:** `a`, `b`, `x`, `y`
+- **Shoulders:** `l`, `r`
+- **D-pad:** `up`, `down`, `left`, `right`
+- **System:** `select`, `start`
+- **Reserved (system-specific):** `u`, `d`
+
+#### setControllerInput
+Press `A` and `Right` on controller 1:
+```json
+{
+  "command": "setControllerInput",
+  "port": 0,
+  "buttons": {"a": true, "right": true}
+}
+```
+
+Flat form (without the `buttons` sub-object) is also accepted:
+```json
+{"command": "setControllerInput", "port": 0, "a": true, "start": true}
+```
+
+To release everything on a port (all buttons false), send an empty button set:
+```json
+{"command": "setControllerInput", "port": 0, "buttons": {}}
+```
+
+**To simulate a button tap:** set the button down, wait / step a few frames, then release it. A typical pattern:
+```python
+send_command("setControllerInput", port=0, buttons={"start": True})
+send_command("step", cpuType="Snes", stepType="PpuFrame", count=3)
+send_command("setControllerInput", port=0, buttons={})
+```
+
+#### clearControllerInput
+Release all buttons on a port (equivalent to an empty `setControllerInput`).
+```json
+{"command": "clearControllerInput", "port": 0}
+```
+
+---
+
 ## Recommended Workflow for Reverse Engineering
 
 1. **Start**: Call `getStatus` to confirm a ROM is loaded and the debugger is active.
@@ -389,3 +504,6 @@ Returns: `{"running":true,"paused":true,"romLoaded":true,"romPath":"...","consol
 - Memory reads are limited to 65536 bytes per call.
 - Disassembly is limited to 500 rows per call.
 - All hex addresses in responses are uppercase without a prefix (e.g., `"008000"` not `"0x008000"`).
+- `loadRom`, `reloadRom`, `powerCycle`, `powerOff`, and `reset` return immediately — the operation runs asynchronously. Poll `getStatus` if you need to wait for completion.
+- Controller input overrides **persist** until changed. Always clear them when done, or the game will see the buttons held forever.
+- Save state slots are numbered **1-10** in the API, matching the UI. File paths must be absolute.

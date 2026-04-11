@@ -172,8 +172,16 @@ namespace Mesen.Debugger.ViewModels
 		/// </summary>
 		public void OnBreakpointHit(BreakEvent evt)
 		{
-			// Only react to real user-set breakpoints, not pause/step/NMI/etc.
+			// Only react to breakpoint events (not pause/step/NMI/etc.).
 			if(evt.Source != BreakSource.Breakpoint) return;
+
+			// Master toggle: the user can disable all AI breakpoint reactions.
+			if(!Config.RespondToAiBreakpoints) return;
+
+			// Only react to breakpoints the AI placed itself. User-set breakpoints are ignored
+			// so the user can debug normally without the companion grabbing every break.
+			Breakpoint? hitBp = BreakpointManager.GetBreakpointById(evt.BreakpointId);
+			if(hitBp == null || !BreakpointManager.IsAiSet(hitBp)) return;
 
 			uint addr = (uint)evt.Operation.Address;
 			string cpu = evt.SourceCpu.ToString();

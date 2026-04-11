@@ -1181,6 +1181,7 @@ None         — RESERVED: means this label has never been touched. Never assign
 			};
 
 			BreakpointManager.AddBreakpoint(bp);
+			BreakpointManager.MarkAsAiSet(bp);
 			string range = addr == endAddr ? $"${addr:X6}" : $"${addr:X6}–${endAddr:X6}";
 			string cond  = condition.Length > 0 ? $" when ({condition})" : "";
 			return $"Breakpoint set: {range} [{memType}, {breakOn}]{cond}.";

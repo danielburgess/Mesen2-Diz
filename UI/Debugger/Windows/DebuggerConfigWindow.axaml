@@ -386,6 +386,14 @@
 								</Grid>
 						</c:OptionSection>
 
+						<c:OptionSection Header="Breakpoint Handling">
+							<CheckBox
+								IsChecked="{Binding AiConfig.RespondToAiBreakpoints}"
+								FontSize="11"
+								Content="Respond when AI-set breakpoints are hit"
+								ToolTip.Tip="When enabled, the AI companion reacts to breakpoints it placed itself (via its tools or the IPC). User-set breakpoints are always ignored." />
+						</c:OptionSection>
+
 						<c:OptionSection Header="Mode Prompts">
 							<StackPanel>
 								<TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"

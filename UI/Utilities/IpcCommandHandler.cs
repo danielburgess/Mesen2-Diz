@@ -1,13 +1,16 @@
 using Avalonia.Threading;
 using Mesen.Config;
+using Mesen.Config.Shortcuts;
 using Mesen.Debugger;
 using Mesen.Debugger.Labels;
 using Mesen.Interop;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Text.Json.Nodes;
+using System.Threading.Tasks;
 
 namespace Mesen.Utilities
 {
@@ -83,6 +86,23 @@ namespace Mesen.Utilities
 
 					// Screenshot
 					"takeScreenshot" => CmdTakeScreenshot(root),
+
+					// Emulator control
+					"loadRom" => CmdLoadRom(root),
+					"reloadRom" => CmdReloadRom(),
+					"powerCycle" => CmdPowerCycle(),
+					"powerOff" => CmdPowerOff(),
+					"reset" => CmdReset(),
+
+					// Save states
+					"saveStateSlot" => CmdSaveStateSlot(root),
+					"loadStateSlot" => CmdLoadStateSlot(root),
+					"saveStateFile" => CmdSaveStateFile(root),
+					"loadStateFile" => CmdLoadStateFile(root),
+
+					// Controller input override
+					"setControllerInput" => CmdSetControllerInput(root),
+					"clearControllerInput" => CmdClearControllerInput(root),
 
 					_ => Error($"Unknown command: {cmd}")
 				};
@@ -480,6 +500,7 @@ namespace Mesen.Utilities
 					Enabled = enabled
 				};
 				BreakpointManager.AddBreakpoint(bp);
+				BreakpointManager.MarkAsAiSet(bp);
 			});
 
 			return Ok(new JsonObject {
@@ -704,6 +725,166 @@ namespace Mesen.Utilities
 			var obj = new JsonObject();
 			if(path != null) obj["path"] = path;
 			return Ok(obj);
+		}
+
+		// ── Emulator Control ─────────────────────────────────────────────────
+
+		private static string CmdLoadRom(JsonNode root)
+		{
+			string? path = root["path"]?.GetValue<string>();
+			if(string.IsNullOrEmpty(path)) return Error("Missing 'path'");
+			if(!File.Exists(path)) return Error($"ROM file not found: {path}");
+
+			string? patchPath = root["patchPath"]?.GetValue<string>();
+			if(!string.IsNullOrEmpty(patchPath) && !File.Exists(patchPath)) {
+				return Error($"Patch file not found: {patchPath}");
+			}
+
+			// LoadRomHelper dispatches to a background task internally.
+			RunOnUiThread(() => {
+				if(string.IsNullOrEmpty(patchPath)) {
+					LoadRomHelper.LoadRom(path);
+				} else {
+					LoadRomHelper.LoadRom(path, patchPath);
+				}
+			});
+
+			return Ok(new JsonObject {
+				["path"] = path,
+				["patchPath"] = patchPath
+			});
+		}
+
+		private static string CmdReloadRom()
+		{
+			if(!EmuApi.IsRunning()) return Error("No ROM is currently loaded");
+			LoadRomHelper.ReloadRom();
+			return Ok();
+		}
+
+		private static string CmdPowerCycle()
+		{
+			if(!EmuApi.IsRunning()) return Error("No ROM is currently loaded");
+			LoadRomHelper.PowerCycle();
+			return Ok();
+		}
+
+		private static string CmdPowerOff()
+		{
+			if(!EmuApi.IsRunning()) return Error("No ROM is currently loaded");
+			LoadRomHelper.PowerOff();
+			return Ok();
+		}
+
+		private static string CmdReset()
+		{
+			if(!EmuApi.IsRunning()) return Error("No ROM is currently loaded");
+			LoadRomHelper.Reset();
+			return Ok();
+		}
+
+		// ── Save States ──────────────────────────────────────────────────────
+
+		private static uint ParseSlot(JsonNode? node)
+		{
+			if(node == null) throw new ArgumentException("Missing 'slot' (1-10)");
+			int slot = node.GetValue<int>();
+			if(slot < 1 || slot > 10) throw new ArgumentException("Slot must be between 1 and 10");
+			return (uint)slot;
+		}
+
+		private static string CmdSaveStateSlot(JsonNode root)
+		{
+			if(!EmuApi.IsRunning()) return Error("No ROM is currently loaded");
+			uint slot = ParseSlot(root["slot"]);
+			EmuApi.SaveState(slot);
+			return Ok(new JsonObject { ["slot"] = (int)slot });
+		}
+
+		private static string CmdLoadStateSlot(JsonNode root)
+		{
+			if(!EmuApi.IsRunning()) return Error("No ROM is currently loaded");
+			uint slot = ParseSlot(root["slot"]);
+			EmuApi.LoadState(slot);
+			return Ok(new JsonObject { ["slot"] = (int)slot });
+		}
+
+		private static string CmdSaveStateFile(JsonNode root)
+		{
+			if(!EmuApi.IsRunning()) return Error("No ROM is currently loaded");
+			string? path = root["path"]?.GetValue<string>();
+			if(string.IsNullOrEmpty(path)) return Error("Missing 'path'");
+			EmuApi.SaveStateFile(path);
+			return Ok(new JsonObject { ["path"] = path });
+		}
+
+		private static string CmdLoadStateFile(JsonNode root)
+		{
+			if(!EmuApi.IsRunning()) return Error("No ROM is currently loaded");
+			string? path = root["path"]?.GetValue<string>();
+			if(string.IsNullOrEmpty(path)) return Error("Missing 'path'");
+			if(!File.Exists(path)) return Error($"Save state file not found: {path}");
+			EmuApi.LoadStateFile(path);
+			return Ok(new JsonObject { ["path"] = path });
+		}
+
+		// ── Controller Input Override ────────────────────────────────────────
+
+		private static bool GetBtn(JsonNode root, string name)
+		{
+			JsonNode? n = root[name];
+			if(n == null) return false;
+			try { return n.GetValue<bool>(); } catch { }
+			try { return n.GetValue<int>() != 0; } catch { }
+			return false;
+		}
+
+		private static string CmdSetControllerInput(JsonNode root)
+		{
+			int port = root["port"]?.GetValue<int>() ?? 0;
+			if(port < 0 || port > 7) return Error("Port must be between 0 and 7");
+
+			// Accept either a "buttons" sub-object or flat keys on the root.
+			JsonNode src = root["buttons"] ?? root;
+
+			DebugControllerState state = new DebugControllerState {
+				A      = GetBtn(src, "a"),
+				B      = GetBtn(src, "b"),
+				X      = GetBtn(src, "x"),
+				Y      = GetBtn(src, "y"),
+				L      = GetBtn(src, "l"),
+				R      = GetBtn(src, "r"),
+				U      = GetBtn(src, "u"),
+				D      = GetBtn(src, "d"),
+				Up     = GetBtn(src, "up"),
+				Down   = GetBtn(src, "down"),
+				Left   = GetBtn(src, "left"),
+				Right  = GetBtn(src, "right"),
+				Select = GetBtn(src, "select"),
+				Start  = GetBtn(src, "start")
+			};
+
+			DebugApi.SetInputOverrides((uint)port, state);
+
+			return Ok(new JsonObject {
+				["port"] = port,
+				["state"] = new JsonObject {
+					["a"] = state.A, ["b"] = state.B, ["x"] = state.X, ["y"] = state.Y,
+					["l"] = state.L, ["r"] = state.R, ["u"] = state.U, ["d"] = state.D,
+					["up"] = state.Up, ["down"] = state.Down,
+					["left"] = state.Left, ["right"] = state.Right,
+					["select"] = state.Select, ["start"] = state.Start
+				}
+			});
+		}
+
+		private static string CmdClearControllerInput(JsonNode root)
+		{
+			int port = root["port"]?.GetValue<int>() ?? 0;
+			if(port < 0 || port > 7) return Error("Port must be between 0 and 7");
+
+			DebugApi.SetInputOverrides((uint)port, new DebugControllerState());
+			return Ok(new JsonObject { ["port"] = port });
 		}
 	}
 }

@@ -53,6 +53,12 @@ namespace Mesen.Config
 
 		[Reactive] public AiMode ActiveMode { get; set; } = AiMode.Default;
 
+		/// <summary>
+		/// When enabled, the AI companion reacts when a breakpoint it set itself is hit.
+		/// User-set breakpoints are always ignored regardless of this setting.
+		/// </summary>
+		[Reactive] public bool RespondToAiBreakpoints { get; set; } = true;
+
 		[Reactive] public string ExplorerModePrompt { get; set; } = AiModeDefaults.ExplorerPrompt;
 		[Reactive] public string AnnotationModePrompt { get; set; } = AiModeDefaults.AnnotationPrompt;
 		[Reactive] public string HistorianModePrompt { get; set; } = AiModeDefaults.HistorianPrompt;
