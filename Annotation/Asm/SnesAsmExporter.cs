@@ -124,7 +124,7 @@ public static class SnesAsmExporter
             // assignments at the end of the file.
             if (allLabelsByOffset.TryGetValue(i, out var label) && label.Length > 0
                 && !looseLabelsByOffset.ContainsKey(i))
-                sb.AppendLine($"{label}:");
+                sb.AppendLine($"{label}: ; ${snesAddr:X6}");
 
             commentsByOffset.TryGetValue(i, out var inlineComment);
 
@@ -251,7 +251,7 @@ public static class SnesAsmExporter
 
             if (allLabelsByOffset.TryGetValue(i, out var label) && label.Length > 0
                 && !looseLabelsByOffset.ContainsKey(i))
-                sb.AppendLine($"{label}:");
+                sb.AppendLine($"{label}: ; ${snesAddr:X6}");
 
             commentsByOffset.TryGetValue(i, out var inlineComment);
 

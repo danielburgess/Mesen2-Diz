@@ -109,6 +109,9 @@ namespace Mesen.Debugger.Windows
 					}
 				}
 			});
+
+			// Start the IPC server so external tools can send debugger commands
+			IpcServer.Start();
 		}
 
 		protected override void OnClosing(WindowClosingEventArgs e)
@@ -119,6 +122,7 @@ namespace Mesen.Debugger.Windows
 				return;
 			}
 
+			IpcServer.Stop();
 			_model.Config.SaveWindowSettings(this);
 		}
 
