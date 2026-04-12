@@ -25,8 +25,7 @@ namespace Mesen.Debugger
 		public ToolContainerViewModel<FunctionListViewModel> FunctionListTool { get; private set; }
 		public ToolContainerViewModel<FindResultListViewModel> FindResultListTool { get; private set; }
 		public ToolContainerViewModel<ControllerListViewModel> ControllerListTool { get; private set; }
-		public ToolContainerViewModel<AiCompanionViewModel> AiChatTool { get; private set; }
-		public ToolContainerViewModel<AiCompanionQueueViewModel> AiQueueTool { get; private set; }
+		public ToolContainerViewModel<IpcEventLogViewModel> IpcEventLogTool { get; private set; }
 
 		private DockEntryDefinition? _savedRootDef;
 
@@ -45,8 +44,7 @@ namespace Mesen.Debugger
 			FunctionListTool = new("Functions");
 			FindResultListTool = new("Find Results");
 			ControllerListTool = new("Controllers");
-			AiChatTool = new("AI Chat");
-			AiQueueTool = new("Tool Log");
+			IpcEventLogTool = new("IPC Events");
 
 			_savedRootDef = savedRootDef;
 		}
@@ -82,20 +80,9 @@ namespace Mesen.Debugger
 								VisibleDockables = CreateList<IDockable>(DisassemblyTool, SourceViewTool)
 							},
 							new MesenProportionalDockSplitter(),
-							new ProportionalDock {
+							new ToolDock {
 								Proportion = 0.30,
-								Orientation = Orientation.Vertical,
-								VisibleDockables = CreateList<IDockable>(
-									new ToolDock {
-										Proportion = 0.60,
-										VisibleDockables = CreateList<IDockable>(AiChatTool)
-									},
-									new MesenProportionalDockSplitter(),
-									new ToolDock {
-										Proportion = 0.40,
-										VisibleDockables = CreateList<IDockable>(AiQueueTool)
-									}
-								)
+								VisibleDockables = CreateList<IDockable>(IpcEventLogTool)
 							},
 							new MesenProportionalDockSplitter(),
 							new ProportionalDock {
@@ -238,8 +225,7 @@ namespace Mesen.Debugger
 						case nameof(FunctionListViewModel): return FunctionListTool;
 						case nameof(FindResultListViewModel): return FindResultListTool;
 						case nameof(ControllerListViewModel): return ControllerListTool;
-					case nameof(AiCompanionViewModel): return AiChatTool;
-					case nameof(AiCompanionQueueViewModel): return AiQueueTool;
+					case nameof(IpcEventLogViewModel): return IpcEventLogTool;
 					}
 					break;
 			}

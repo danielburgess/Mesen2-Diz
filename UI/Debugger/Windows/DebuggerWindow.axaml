@@ -8,8 +8,7 @@
 	xmlns:sv="using:Mesen.Debugger.StatusViews"
 	xmlns:dbg="using:Mesen.Debugger"
 	xmlns:v="using:Mesen.Debugger.Views"
-	xmlns:ai="using:Mesen.Debugger.AI"
-	xmlns:vd="using:Mesen.Debugger.Views.DebuggerDock"
+xmlns:vd="using:Mesen.Debugger.Views.DebuggerDock"
 	xmlns:c="using:Mesen.Controls"
 	xmlns:l="using:Mesen.Localization"
 	xmlns:dc="using:Mesen.Debugger.Controls"
@@ -133,11 +132,8 @@
 		<DataTemplate DataType="{x:Type vm:WatchListViewModel}">
 			<v:WatchListView />
 		</DataTemplate>
-		<DataTemplate DataType="{x:Type vm:AiCompanionViewModel}">
-			<v:AiChatView />
-		</DataTemplate>
-		<DataTemplate DataType="{x:Type vm:AiCompanionQueueViewModel}">
-			<v:AiQueueView />
+		<DataTemplate DataType="{x:Type vm:IpcEventLogViewModel}">
+			<v:IpcEventLogView />
 		</DataTemplate>
 	</Window.DataTemplates>
 	

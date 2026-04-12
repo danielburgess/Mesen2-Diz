@@ -104,6 +104,26 @@ namespace Mesen.Utilities
 					"setControllerInput" => CmdSetControllerInput(root),
 					"clearControllerInput" => CmdClearControllerInput(root),
 
+					// Emulation settings
+					"getEmulationSpeed" => CmdGetEmulationSpeed(),
+					"setEmulationSpeed" => CmdSetEmulationSpeed(root),
+					"getTurboSpeed" => CmdGetTurboSpeed(),
+					"setTurboSpeed" => CmdSetTurboSpeed(root),
+					"getRunAheadFrames" => CmdGetRunAheadFrames(),
+					"setRunAheadFrames" => CmdSetRunAheadFrames(root),
+					"getConfig" => CmdGetConfig(),
+
+					// Timing & PPU
+					"getTimingInfo" => CmdGetTimingInfo(root),
+					"getPpuState" => CmdGetPpuState(root),
+
+					// IPC info
+					"getIpcInfo" => CmdGetIpcInfo(),
+
+					// Cheats
+					"setCheats" => CmdSetCheats(root),
+					"clearCheats" => CmdClearCheats(),
+
 					_ => Error($"Unknown command: {cmd}")
 				};
 			} catch(Exception ex) {
@@ -885,6 +905,150 @@ namespace Mesen.Utilities
 
 			DebugApi.SetInputOverrides((uint)port, new DebugControllerState());
 			return Ok(new JsonObject { ["port"] = port });
+		}
+
+		// ── Emulation Settings ───────────────────────────────────────────────
+
+		private static string CmdGetEmulationSpeed()
+		{
+			return Ok(new JsonObject { ["speed"] = (int)ConfigManager.Config.Emulation.EmulationSpeed });
+		}
+
+		private static string CmdSetEmulationSpeed(JsonNode root)
+		{
+			int speed = root["speed"]?.GetValue<int>() ?? -1;
+			if(speed < 0 || speed > 5000) return Error("Speed must be 0-5000 (0=unlimited)");
+			ConfigManager.Config.Emulation.EmulationSpeed = (uint)speed;
+			ConfigManager.Config.Emulation.ApplyConfig();
+			return Ok(new JsonObject { ["speed"] = speed });
+		}
+
+		private static string CmdGetTurboSpeed()
+		{
+			return Ok(new JsonObject { ["speed"] = (int)ConfigManager.Config.Emulation.TurboSpeed });
+		}
+
+		private static string CmdSetTurboSpeed(JsonNode root)
+		{
+			int speed = root["speed"]?.GetValue<int>() ?? -1;
+			if(speed < 0 || speed > 5000) return Error("Speed must be 0-5000 (0=unlimited)");
+			ConfigManager.Config.Emulation.TurboSpeed = (uint)speed;
+			ConfigManager.Config.Emulation.ApplyConfig();
+			return Ok(new JsonObject { ["speed"] = speed });
+		}
+
+		private static string CmdGetRunAheadFrames()
+		{
+			return Ok(new JsonObject { ["frames"] = (int)ConfigManager.Config.Emulation.RunAheadFrames });
+		}
+
+		private static string CmdSetRunAheadFrames(JsonNode root)
+		{
+			int frames = root["frames"]?.GetValue<int>() ?? -1;
+			if(frames < 0 || frames > 10) return Error("Frames must be 0-10");
+			ConfigManager.Config.Emulation.RunAheadFrames = (uint)frames;
+			ConfigManager.Config.Emulation.ApplyConfig();
+			return Ok(new JsonObject { ["frames"] = frames });
+		}
+
+		private static string CmdGetConfig()
+		{
+			var emu = ConfigManager.Config.Emulation;
+			return Ok(new JsonObject {
+				["emulationSpeed"] = (int)emu.EmulationSpeed,
+				["turboSpeed"] = (int)emu.TurboSpeed,
+				["rewindSpeed"] = (int)emu.RewindSpeed,
+				["runAheadFrames"] = (int)emu.RunAheadFrames
+			});
+		}
+
+		// ── Timing & PPU ─────────────────────────────────────────────────────
+
+		private static string CmdGetTimingInfo(JsonNode root)
+		{
+			CpuType cpuType = ParseCpuType(root["cpuType"]);
+			TimingInfo timing = EmuApi.GetTimingInfo(cpuType);
+			return Ok(new JsonObject {
+				["fps"] = timing.Fps,
+				["masterClock"] = (long)timing.MasterClock,
+				["masterClockRate"] = (long)timing.MasterClockRate,
+				["frameCount"] = (long)timing.FrameCount,
+				["scanlineCount"] = (long)timing.ScanlineCount,
+				["firstScanline"] = timing.FirstScanline,
+				["cycleCount"] = (long)timing.CycleCount
+			});
+		}
+
+		private static string CmdGetPpuState(JsonNode root)
+		{
+			CpuType cpuType = ParseCpuType(root["cpuType"]);
+
+			if(cpuType == CpuType.Snes) {
+				var ppu = DebugApi.GetPpuState<SnesPpuState>(CpuType.Snes);
+				return Ok(new JsonObject {
+					["cpuType"] = "Snes",
+					["cycle"] = ppu.Cycle,
+					["scanline"] = ppu.Scanline,
+					["hClock"] = ppu.HClock,
+					["frameCount"] = (long)ppu.FrameCount,
+					["forcedBlank"] = ppu.ForcedBlank,
+					["screenBrightness"] = ppu.ScreenBrightness,
+					["bgMode"] = ppu.BgMode,
+					["mode1Bg3Priority"] = ppu.Mode1Bg3Priority,
+					["mainScreenLayers"] = ppu.MainScreenLayers,
+					["subScreenLayers"] = ppu.SubScreenLayers,
+					["vramAddress"] = ppu.VramAddress.ToString("X4")
+				});
+			}
+
+			return Error($"PPU state not supported for {cpuType}");
+		}
+
+		// ── IPC Info ─────────────────────────────────────────────────────────
+
+		private static string CmdGetIpcInfo()
+		{
+			string pipeName = IpcServer.CurrentPipeName;
+			string romPath = "";
+			try { romPath = EmuApi.GetRomInfo().RomPath; } catch { }
+
+			return Ok(new JsonObject {
+				["pipeName"] = pipeName,
+				["pipePath"] = IpcServer.GetPlatformPipePath(pipeName),
+				["romPath"] = romPath,
+				["platform"] = OperatingSystem.IsWindows() ? "windows" : "linux"
+			});
+		}
+
+		// ── Cheats ───────────────────────────────────────────────────────────
+
+		private static string CmdSetCheats(JsonNode root)
+		{
+			var cheatsNode = root["cheats"]?.AsArray();
+			if(cheatsNode == null || cheatsNode.Count == 0) return Error("Missing 'cheats' array");
+
+			var cheats = new List<InteropCheatCode>();
+			foreach(var c in cheatsNode) {
+				if(c == null) continue;
+				string? typeStr = c["type"]?.GetValue<string>();
+				string? code = c["code"]?.GetValue<string>();
+				if(string.IsNullOrEmpty(typeStr) || string.IsNullOrEmpty(code)) {
+					return Error("Each cheat needs 'type' and 'code'");
+				}
+				if(!Enum.TryParse<CheatType>(typeStr, true, out var cheatType)) {
+					return Error($"Invalid cheat type: {typeStr}");
+				}
+				cheats.Add(new InteropCheatCode(cheatType, code));
+			}
+
+			EmuApi.SetCheats(cheats.ToArray(), (uint)cheats.Count);
+			return Ok(new JsonObject { ["count"] = cheats.Count });
+		}
+
+		private static string CmdClearCheats()
+		{
+			EmuApi.ClearCheats();
+			return Ok();
 		}
 	}
 }

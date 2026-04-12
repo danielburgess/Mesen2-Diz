@@ -1116,9 +1116,7 @@
 			<Control ID="btnClose">Close</Control>
 		</Form>
 
-		<Form ID="AiCompanionWindow">
-			<Control ID="wndTitle">AI Companion</Control>
-		</Form>
+
 
 		<Form ID="RomMapWindow">
 			<Control ID="wndTitle">ROM Map</Control>
@@ -3079,10 +3077,6 @@ E
 			<Value ID="Show">Show</Value>
 			<Value ID="Disassemble">Disassemble</Value>
 		</Enum>
-		<Enum ID="AiProvider">
-			<Value ID="Claude">Claude (Anthropic)</Value>
-			<Value ID="OpenAiCompatible">OpenAI-compatible (Ollama, LM Studio…)</Value>
-		</Enum>
 		<Enum ID="AddressDisplayType">
 			<Value ID="CpuAddress">CPU address</Value>
 			<Value ID="AbsAddress">ROM address</Value>
@@ -3275,7 +3269,6 @@ E
 			<Value ID="OpenSpriteViewer">Open Sprite Viewer</Value>
 			<Value ID="OpenPaletteViewer">Open Palette Viewer</Value>
 			<Value ID="OpenRomMapViewer">Open ROM Map</Value>
-			<Value ID="OpenAiCompanion">Open AI Companion</Value>
 			<Value ID="FindReplaceInComments">Find/Replace in Comments</Value>
 			<Value ID="ToggleInlineLabelEdit">Inline Label Editing</Value>
 			<Value ID="Reset">Reset</Value>
@@ -3479,8 +3472,7 @@ E
 			<Value ID="ShowCallStack">Show call stack</Value>
 			<Value ID="ShowConsoleStatus">Show console status</Value>
 			<Value ID="ShowControllers">Show controllers</Value>
-			<Value ID="ShowAiChat">Show AI chat</Value>
-			<Value ID="ShowAiQueue">Show AI queue/tool log</Value>
+			<Value ID="ShowIpcEventLog">Show IPC event log</Value>
 			
 			<Value ID="ShowSettingsPanel">Show settings panel</Value>
 			<Value ID="ShowMemoryMappings">Show memory mappings</Value>
@@ -3564,7 +3556,6 @@ E
 			<Value ID="OpenSpriteViewer">Sprite Viewer</Value>
 			<Value ID="OpenPaletteViewer">Palette Viewer</Value>
 			<Value ID="OpenRomMapViewer">ROM Map</Value>
-			<Value ID="OpenAiCompanion">AI Companion</Value>
 			<Value ID="FindReplaceInComments">Find/Replace Comments</Value>
 			<Value ID="ToggleInlineLabelEdit">Inline Editing</Value>
 			<Value ID="OpenDebugSettings">Settings</Value>
@@ -3751,16 +3742,6 @@ E
 
 			<Value ID="CopyToClipboard">Copy to clipboard</Value>
 			<Value ID="ResetProfilerData">Reset profiler data</Value>
-		</Enum>
-		<Enum ID="AiMode">
-			<Value ID="Default">Default</Value>
-			<Value ID="Explorer">Explorer</Value>
-			<Value ID="Annotation">Annotation</Value>
-			<Value ID="Historian">Historian</Value>
-		</Enum>
-		<Enum ID="AiProvider">
-			<Value ID="Claude">Claude</Value>
-			<Value ID="OpenAiCompatible">OpenAI-Compatible</Value>
 		</Enum>
 		<Enum ID="FunctionCategory">
 			<Value ID="None">None</Value>

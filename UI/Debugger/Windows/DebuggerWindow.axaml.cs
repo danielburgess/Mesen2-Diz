@@ -111,7 +111,8 @@ namespace Mesen.Debugger.Windows
 			});
 
 			// Start the IPC server so external tools can send debugger commands
-			IpcServer.Start();
+			string? romName = EmuApi.IsRunning() ? EmuApi.GetRomInfo().GetRomName() : null;
+			IpcServer.Start(romName);
 		}
 
 		protected override void OnClosing(WindowClosingEventArgs e)
@@ -140,7 +141,6 @@ namespace Mesen.Debugger.Windows
 						BreakpointManager.ClearTemporaryBreakpoints();
 
 						_model.UpdateDebugger(true, evt);
-						_model.AiCompanion.OnBreakpointHit(evt);
 						if(!_suppressBringToFront) {
 							bool isPause = evt.Source == BreakSource.Pause;
 							bool isBreak = !isPause && evt.Source != BreakSource.PpuStep && evt.Source != BreakSource.InternalOperation;
@@ -173,8 +173,9 @@ namespace Mesen.Debugger.Windows
 					break;
 
 				case ConsoleNotificationType.GameLoaded:
-					Dispatcher.UIThread.Post(() => _model.AiCompanion.OnGameLoaded());
+					// Restart IPC server with new ROM name
 					RomInfo romInfo = EmuApi.GetRomInfo();
+					IpcServer.RestartForRom(romInfo.GetRomName());
 					HashSet<CpuType> cpuTypes = romInfo.CpuTypes;
 					if(!cpuTypes.Contains(_model.CpuType)) {
 						if(!_model.IsMainCpuDebugger || _model.CpuType == romInfo.ConsoleType.GetMainCpuType()) {

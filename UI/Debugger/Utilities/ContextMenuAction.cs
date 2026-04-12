@@ -393,8 +393,7 @@ namespace Mesen.Debugger.Utilities
 		ShowLabelList,
 		ShowCallStack,
 		ShowControllers,
-		ShowAiChat,
-		ShowAiQueue,
+		ShowIpcEventLog,
 
 		ShowSettingsPanel,
 		ShowMemoryMappings,
@@ -546,9 +545,6 @@ namespace Mesen.Debugger.Utilities
 
 		[IconFile("RomMap")]
 		OpenRomMapViewer,
-
-		[IconFile("Find")]
-		OpenAiCompanion,
 
 		[IconFile("Chip")]
 		OpenAssembler,

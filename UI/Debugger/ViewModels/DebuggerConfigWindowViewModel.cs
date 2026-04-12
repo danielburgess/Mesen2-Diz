@@ -21,8 +21,7 @@ namespace Mesen.Debugger.ViewModels
 		public DebuggerConfig Debugger { get; set; }
 		public ScriptWindowConfig Script { get; set; }
 		public IntegrationConfig Integration { get; set; }
-		public AiCompanionConfig AiConfig { get; set; }
-		[Reactive] public bool IsLocalAiProvider { get; private set; }
+		public IpcConfig IpcConfig { get; set; }
 
 		public string CurrentRomName { get; }
 		public bool HasRomLoaded => !string.IsNullOrEmpty(CurrentRomName);
@@ -55,16 +54,13 @@ namespace Mesen.Debugger.ViewModels
 			Fonts = ConfigManager.Config.Debug.Fonts;
 			Script = ConfigManager.Config.Debug.ScriptWindow;
 			Integration = ConfigManager.Config.Debug.Integration;
-			AiConfig = ConfigManager.Config.Debug.AiCompanion;
+			IpcConfig = ConfigManager.Config.Debug.Ipc;
 
 			_backupDebugger = Debugger.Clone();
 			_backupFont = Fonts.Clone();
 			_backupScript = Script.Clone();
 			_backupIntegration = Integration.Clone();
 			_backupShortcuts = ConfigManager.Config.Debug.Shortcuts.Clone();
-
-			IsLocalAiProvider = AiConfig.Provider == AiProvider.OpenAiCompatible;
-			AddDisposable(AiConfig.WhenAnyValue(x => x.Provider).Subscribe(p => IsLocalAiProvider = p == AiProvider.OpenAiCompatible));
 
 			CurrentRomName = RamDumper.GetCurrentRomName();
 			if(HasRomLoaded && Debugger.RamDumpFolderOverrides.TryGetValue(CurrentRomName, out string? existingOverride)) {
@@ -358,7 +354,7 @@ namespace Mesen.Debugger.ViewModels
 		//separator
 		FontAndColors = 3,
 		Integration = 4,
-		AiCompanion = 5,
+		Ipc = 5,
 		//separator
 		Shortcuts = 7
 	}

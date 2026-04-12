@@ -3,26 +3,36 @@ using System.IO;
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Mesen.Config;
+using Mesen.Interop;
 
 namespace Mesen.Utilities
 {
 	public class IpcServer : IDisposable
 	{
-		public const string PipeName = "Mesen2Diz_DebuggerIpc";
+		public const string DefaultPipeName = "Mesen2Diz_DebuggerIpc";
 
 		private CancellationTokenSource? _cts;
 		private Task? _listenTask;
 		private bool _disposed;
+		private string _pipeName;
 
 		private static IpcServer? _instance;
 		public static IpcServer? Instance => _instance;
+		public static string CurrentPipeName => _instance?._pipeName ?? DefaultPipeName;
 
-		public static void Start()
+		/// <summary>
+		/// Fired after every IPC command is handled. Args: command, rawRequest, rawResponse, success.
+		/// </summary>
+		public static event Action<string, string, string, bool>? CommandReceived;
+
+		public static void Start(string? romName = null)
 		{
-			if(_instance != null) return;
-			_instance = new IpcServer();
+			Stop();
+			_instance = new IpcServer(ResolvePipeName(romName));
 			_instance.StartListening();
 		}
 
@@ -30,6 +40,49 @@ namespace Mesen.Utilities
 		{
 			_instance?.Dispose();
 			_instance = null;
+		}
+
+		/// <summary>
+		/// Restart with a new pipe name when the ROM changes.
+		/// </summary>
+		public static void RestartForRom(string? romName)
+		{
+			Start(romName);
+		}
+
+		private static string ResolvePipeName(string? romName)
+		{
+			string configOverride = ConfigManager.Config.Debug.Ipc.PipeName;
+			if(!string.IsNullOrWhiteSpace(configOverride)) {
+				return SanitizePipeName(configOverride);
+			}
+			if(!string.IsNullOrWhiteSpace(romName)) {
+				return "Mesen2Diz_" + SanitizePipeName(romName);
+			}
+			return DefaultPipeName;
+		}
+
+		private static string SanitizePipeName(string name)
+		{
+			return Regex.Replace(Path.GetFileNameWithoutExtension(name), @"[^a-zA-Z0-9_]", "_");
+		}
+
+		/// <summary>
+		/// Returns the platform-specific path to the named pipe.
+		/// Linux: /tmp/CoreFxPipe_{name}
+		/// Windows: \\.\pipe\{name}
+		/// </summary>
+		public static string GetPlatformPipePath(string pipeName)
+		{
+			if(OperatingSystem.IsWindows()) {
+				return @"\\.\pipe\" + pipeName;
+			}
+			return "/tmp/CoreFxPipe_" + pipeName;
+		}
+
+		private IpcServer(string pipeName)
+		{
+			_pipeName = pipeName;
 		}
 
 		private void StartListening()
@@ -44,7 +97,7 @@ namespace Mesen.Utilities
 				NamedPipeServerStream? server = null;
 				try {
 					server = new NamedPipeServerStream(
-						PipeName,
+						_pipeName,
 						PipeDirection.InOut,
 						NamedPipeServerStream.MaxAllowedServerInstances,
 						PipeTransmissionMode.Byte,
@@ -52,7 +105,6 @@ namespace Mesen.Utilities
 					);
 
 					await server.WaitForConnectionAsync(ct);
-					// Handle each connection on its own task so we can accept the next one immediately
 					_ = Task.Run(() => HandleConnection(server, ct), ct);
 				} catch(OperationCanceledException) {
 					server?.Dispose();
@@ -60,7 +112,6 @@ namespace Mesen.Utilities
 				} catch(Exception ex) {
 					Console.WriteLine($"[IPC] Listen error: {ex.Message}");
 					server?.Dispose();
-					// Brief pause before retrying
 					try { await Task.Delay(500, ct); } catch { break; }
 				}
 			}
@@ -73,16 +124,21 @@ namespace Mesen.Utilities
 					using var reader = new StreamReader(server, Encoding.UTF8);
 					using var writer = new StreamWriter(server, Encoding.UTF8) { AutoFlush = true };
 
-					// Read lines until the client disconnects.
-					// Protocol: one JSON object per line, one JSON response per line.
 					while(server.IsConnected && !ct.IsCancellationRequested) {
 						string? line = await reader.ReadLineAsync();
-						if(line == null) break; // client disconnected
+						if(line == null) break;
 						if(string.IsNullOrWhiteSpace(line)) continue;
 
+						string command = "?";
+						bool success = false;
 						string response;
 						try {
+							// Extract command name for logging
+							var parsed = JsonNode.Parse(line);
+							command = parsed?["command"]?.GetValue<string>() ?? "?";
 							response = IpcCommandHandler.HandleCommand(line);
+							var respNode = JsonNode.Parse(response);
+							success = respNode?["success"]?.GetValue<bool>() ?? false;
 						} catch(Exception ex) {
 							response = new JsonObject {
 								["success"] = false,
@@ -90,6 +146,7 @@ namespace Mesen.Utilities
 							}.ToJsonString();
 						}
 
+						CommandReceived?.Invoke(command, line, response, success);
 						await writer.WriteLineAsync(response);
 					}
 				}
@@ -104,9 +161,8 @@ namespace Mesen.Utilities
 			_disposed = true;
 
 			_cts?.Cancel();
-			// Unblock WaitForConnectionAsync by connecting briefly
 			try {
-				using var dummy = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut);
+				using var dummy = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut);
 				dummy.Connect(200);
 			} catch { }
 

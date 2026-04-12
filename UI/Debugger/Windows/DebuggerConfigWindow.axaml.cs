@@ -82,14 +82,7 @@ namespace Mesen.Debugger.Windows
 			}
 		}
 
-		private void OnResetModePromptsClick(object sender, RoutedEventArgs e)
-		{
-			_model.AiConfig.ExplorerModePrompt = AiModeDefaults.ExplorerPrompt;
-			_model.AiConfig.AnnotationModePrompt = AiModeDefaults.AnnotationPrompt;
-			_model.AiConfig.HistorianModePrompt = AiModeDefaults.HistorianPrompt;
-		}
-
-		protected override void OnKeyDown(KeyEventArgs e)
+protected override void OnKeyDown(KeyEventArgs e)
 		{
 			base.OnKeyDown(e);
 			if(e.Key == Key.Escape) {
