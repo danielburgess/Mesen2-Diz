@@ -1,10 +1,5 @@
 # Mesen2-Diz IPC
 
-## Emulator app location
-```
-/mnt/crucial/projects/Mesen2-Diz/bin/linux-x64/Release/linux-x64/publish/Mesen
-```
-
 ## Connection
 Pipe name: auto from ROM (e.g. `Mesen2Diz_SuperMetroid`). Override via config.
 - Linux: `/tmp/CoreFxPipe_{pipeName}`
