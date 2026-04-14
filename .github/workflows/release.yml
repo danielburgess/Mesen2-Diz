@@ -39,8 +39,19 @@ jobs:
       - name: Publish
         run: dotnet publish --no-restore -c Release -p:PublishSingleFile="true" -p:OptimizeUi="true" -p:Platform="Any CPU" -p:TargetFramework="net8.0" -r win-x64 Mesen.sln /p:PublishProfile=UI\Properties\PublishProfiles\Release.pubxml
 
+      - name: Locate published exe
+        run: |
+          Write-Host "=== build/TmpReleaseBuild ==="
+          if (Test-Path build/TmpReleaseBuild) { Get-ChildItem -Recurse build/TmpReleaseBuild }
+          Write-Host "=== find all Mesen.exe ==="
+          Get-ChildItem -Recurse -Filter Mesen.exe -ErrorAction SilentlyContinue | Select-Object FullName, Length
+
       - name: Zip
-        run: Compress-Archive -Path build/TmpReleaseBuild/Mesen.exe -DestinationPath Mesen2-Diz-Windows-net8.zip
+        run: |
+          $exe = Get-ChildItem -Recurse -Filter Mesen.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) { throw "Mesen.exe not found after publish" }
+          Write-Host "Zipping $($exe.FullName)"
+          Compress-Archive -Path $exe.FullName -DestinationPath Mesen2-Diz-Windows-net8.zip
 
       - uses: actions/upload-artifact@v4
         with:
