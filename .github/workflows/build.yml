@@ -39,10 +39,21 @@ jobs:
       - name: Publish Mesen
         run: dotnet publish --no-restore -c Release -p:PublishSingleFile="true" -p:OptimizeUi="true" -p:Platform="Any CPU" -p:TargetFramework="net8.0" -r win-x64 Mesen.sln /p:PublishProfile=UI\Properties\PublishProfiles\Release.pubxml
 
+      - name: Locate published exe
+        shell: pwsh
+        run: |
+          Write-Host "=== build/TmpReleaseBuild ==="
+          if (Test-Path build/TmpReleaseBuild) { Get-ChildItem -Recurse build/TmpReleaseBuild | Select-Object FullName, Length }
+          Write-Host "=== all Mesen.exe anywhere ==="
+          Get-ChildItem -Recurse -Filter Mesen.exe -ErrorAction SilentlyContinue | Select-Object FullName, Length
+          Write-Host "=== all publish dirs ==="
+          Get-ChildItem -Recurse -Directory -Filter publish -ErrorAction SilentlyContinue | Select-Object FullName
+
       - name: Upload Mesen
         uses: actions/upload-artifact@v4
         with:
           name: Mesen (Windows - net8.0)
+          if-no-files-found: error
           path: |
             build/TmpReleaseBuild/Mesen.exe
 
