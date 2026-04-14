@@ -45,15 +45,15 @@
 			ColumnWidths="{Binding ColumnWidths}"
 		>
 			<DataBox.Columns>
-				<DataBoxTemplateColumn ColumnName="AiModified" Header="AI" InitialWidth="18" CanUserResize="False" CanUserSort="True">
+				<DataBoxTemplateColumn ColumnName="IpcModified" Header="IPC" InitialWidth="18" CanUserResize="False" CanUserSort="True">
 					<DataTemplate>
 						<Ellipse
 							x:DataType="vm:LabelViewModel"
 							Width="8" Height="8"
 							HorizontalAlignment="Center" VerticalAlignment="Center"
 							Fill="#22CC44"
-							IsVisible="{Binding IsAiModified}"
-							ToolTip.Tip="Added or updated by AI this session"
+							IsVisible="{Binding IsIpcModified}"
+							ToolTip.Tip="Added or updated via IPC this session"
 						/>
 					</DataTemplate>
 				</DataBoxTemplateColumn>

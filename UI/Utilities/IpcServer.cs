@@ -43,10 +43,30 @@ namespace Mesen.Utilities
 		}
 
 		/// <summary>
-		/// Restart with a new pipe name when the ROM changes.
+		/// Called when a ROM is loaded. Only restarts (disconnecting clients)
+		/// if the pipe name would actually change AND the user has opted in
+		/// via <see cref="Config.IpcConfig.DisconnectOnRomLoad"/>.
+		/// A custom pipe name never changes, so no restart is needed.
 		/// </summary>
 		public static void RestartForRom(string? romName)
 		{
+			string newName = ResolvePipeName(romName);
+
+			// If the server is already running on the same pipe name, no-op.
+			if(_instance != null && _instance._pipeName == newName) {
+				return;
+			}
+
+			// Custom pipe name set — name never changes, no restart needed.
+			if(!string.IsNullOrWhiteSpace(ConfigManager.Config.Debug.Ipc.PipeName)) {
+				return;
+			}
+
+			// User must opt in to disconnect-on-rom-load.
+			if(!ConfigManager.Config.Debug.Ipc.DisconnectOnRomLoad) {
+				return;
+			}
+
 			Start(romName);
 		}
 

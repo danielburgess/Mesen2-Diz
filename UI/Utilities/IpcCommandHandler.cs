@@ -34,6 +34,7 @@ namespace Mesen.Utilities
 				return cmd switch {
 					// Labels
 					"setLabel" => CmdSetLabel(root),
+					"setLabels" => CmdSetLabels(root),
 					"deleteLabel" => CmdDeleteLabel(root),
 					"getLabel" => CmdGetLabel(root),
 					"getLabelByName" => CmdGetLabelByName(root),
@@ -46,6 +47,7 @@ namespace Mesen.Utilities
 
 					// CPU State
 					"getCpuState" => CmdGetCpuState(root),
+					"setCpuState" => CmdSetCpuState(root),
 					"getProgramCounter" => CmdGetProgramCounter(root),
 					"setProgramCounter" => CmdSetProgramCounter(root),
 
@@ -54,6 +56,7 @@ namespace Mesen.Utilities
 					"resume" => CmdResume(),
 					"isPaused" => CmdIsPaused(),
 					"step" => CmdStep(root),
+					"stepTrace" => CmdStepTrace(root),
 
 					// Disassembly
 					"getDisassembly" => CmdGetDisassembly(root),
@@ -205,36 +208,93 @@ namespace Mesen.Utilities
 
 		// ── Label Commands ───────────────────────────────────────────────────
 
-		private static string CmdSetLabel(JsonNode root)
+		private static CodeLabel BuildCodeLabel(JsonNode node)
 		{
-			uint address = ParseHexOrDec(root["address"]);
-			MemoryType memType = ParseMemoryType(root["memoryType"]);
-			string label = root["label"]?.GetValue<string>() ?? "";
-			string comment = root["comment"]?.GetValue<string>() ?? "";
-			uint length = (uint)(root["length"]?.GetValue<int>() ?? 1);
-			string? categoryStr = root["category"]?.GetValue<string>();
+			uint address = ParseHexOrDec(node["address"]);
+			MemoryType memType = ParseMemoryType(node["memoryType"]);
+			string label = node["label"]?.GetValue<string>() ?? "";
+			string comment = node["comment"]?.GetValue<string>() ?? "";
+			uint length = (uint)(node["length"]?.GetValue<int>() ?? 1);
+			string? categoryStr = node["category"]?.GetValue<string>();
 
 			FunctionCategory category = FunctionCategory.None;
 			if(!string.IsNullOrEmpty(categoryStr)) {
 				Enum.TryParse(categoryStr, true, out category);
 			}
 
+			return new CodeLabel {
+				Address = address,
+				MemoryType = memType,
+				Label = label,
+				Comment = comment,
+				Length = length,
+				Category = category
+			};
+		}
+
+		private static JsonObject BuildLabelResponse(CodeLabel cl)
+		{
+			return new JsonObject {
+				["address"] = cl.Address.ToString("X6"),
+				["label"] = cl.Label,
+				["comment"] = cl.Comment,
+				["category"] = cl.Category.ToString()
+			};
+		}
+
+		private static JsonObject BuildLabelResponseWithWarning(CodeLabel cl)
+		{
+			var obj = BuildLabelResponse(cl);
+			if(cl.Category == FunctionCategory.None) {
+				obj["warning"] = "No category set. Setting a category is highly recommended for organization.";
+			}
+			return obj;
+		}
+
+		private static string CmdSetLabel(JsonNode root)
+		{
+			CodeLabel codeLabel = BuildCodeLabel(root);
 			RunOnUiThread(() => {
-				var codeLabel = new CodeLabel {
-					Address = address,
-					MemoryType = memType,
-					Label = label,
-					Comment = comment,
-					Length = length,
-					Category = category
-				};
 				LabelManager.SetLabel(codeLabel, true);
+				LabelManager.MarkAsIpcModified(codeLabel.Address, codeLabel.MemoryType);
+			});
+			return Ok(BuildLabelResponseWithWarning(codeLabel));
+		}
+
+		private static string CmdSetLabels(JsonNode root)
+		{
+			JsonArray? labelsArr = root["labels"]?.AsArray();
+			if(labelsArr == null || labelsArr.Count == 0) return Error("Missing or empty 'labels' array");
+
+			var results = new JsonArray();
+			var codeLabels = new List<CodeLabel>();
+
+			foreach(JsonNode? item in labelsArr) {
+				if(item == null) continue;
+				try {
+					codeLabels.Add(BuildCodeLabel(item));
+				} catch(Exception ex) {
+					results.Add((JsonNode)new JsonObject {
+						["error"] = ex.Message,
+						["address"] = item["address"]?.ToString() ?? "?"
+					});
+				}
+			}
+
+			RunOnUiThread(() => {
+				foreach(var cl in codeLabels) {
+					LabelManager.SetLabel(cl, true);
+					LabelManager.MarkAsIpcModified(cl.Address, cl.MemoryType);
+				}
 			});
 
+			foreach(var cl in codeLabels) {
+				results.Add((JsonNode)BuildLabelResponseWithWarning(cl));
+			}
+
 			return Ok(new JsonObject {
-				["address"] = address.ToString("X6"),
-				["label"] = label,
-				["comment"] = comment
+				["count"] = codeLabels.Count,
+				["results"] = results
 			});
 		}
 
@@ -361,20 +421,7 @@ namespace Mesen.Utilities
 
 			if(cpuType == CpuType.Snes) {
 				var state = DebugApi.GetCpuState<SnesCpuState>(CpuType.Snes);
-				return Ok(new JsonObject {
-					["cpuType"] = "Snes",
-					["a"] = state.A.ToString("X4"),
-					["x"] = state.X.ToString("X4"),
-					["y"] = state.Y.ToString("X4"),
-					["sp"] = state.SP.ToString("X4"),
-					["d"] = state.D.ToString("X4"),
-					["pc"] = state.PC.ToString("X4"),
-					["k"] = state.K.ToString("X2"),
-					["dbr"] = state.DBR.ToString("X2"),
-					["flags"] = state.PS.ToString(),
-					["emulationMode"] = state.EmulationMode,
-					["cycleCount"] = (long)state.CycleCount
-				});
+				return Ok(BuildSnesCpuStateObject(state));
 			}
 
 			uint pc = DebugApi.GetProgramCounter(cpuType, true);
@@ -382,6 +429,58 @@ namespace Mesen.Utilities
 				["cpuType"] = cpuType.ToString(),
 				["pc"] = pc.ToString("X6")
 			});
+		}
+
+		private static string CmdSetCpuState(JsonNode root)
+		{
+			CpuType cpuType = ParseCpuType(root["cpuType"]);
+
+			if(cpuType == CpuType.Snes) {
+				var state = DebugApi.GetCpuState<SnesCpuState>(CpuType.Snes);
+
+				if(root["a"] != null) state.A = (UInt16)ParseHexOrDec(root["a"]);
+				if(root["x"] != null) state.X = (UInt16)ParseHexOrDec(root["x"]);
+				if(root["y"] != null) state.Y = (UInt16)ParseHexOrDec(root["y"]);
+				if(root["sp"] != null) state.SP = (UInt16)ParseHexOrDec(root["sp"]);
+				if(root["d"] != null) state.D = (UInt16)ParseHexOrDec(root["d"]);
+				if(root["dbr"] != null) state.DBR = (byte)ParseHexOrDec(root["dbr"]);
+				if(root["k"] != null) state.K = (byte)ParseHexOrDec(root["k"]);
+				if(root["pc"] != null) state.PC = (UInt16)ParseHexOrDec(root["pc"]);
+				if(root["emulationMode"] != null) state.EmulationMode = root["emulationMode"]!.GetValue<bool>();
+
+				if(root["flags"] != null) {
+					string flagStr = root["flags"]!.GetValue<string>();
+					if(Enum.TryParse<SnesCpuFlags>(flagStr, true, out var flags)) {
+						state.PS = flags;
+					} else if(uint.TryParse(flagStr, NumberStyles.HexNumber, null, out uint rawFlags)) {
+						state.PS = (SnesCpuFlags)rawFlags;
+					}
+				}
+
+				DebugApi.SetCpuState(state, CpuType.Snes);
+
+				return Ok(BuildSnesCpuStateObject(state));
+			}
+
+			return Error($"setCpuState not yet supported for {cpuType}");
+		}
+
+		private static JsonObject BuildSnesCpuStateObject(SnesCpuState state)
+		{
+			return new JsonObject {
+				["cpuType"] = "Snes",
+				["a"] = state.A.ToString("X4"),
+				["x"] = state.X.ToString("X4"),
+				["y"] = state.Y.ToString("X4"),
+				["sp"] = state.SP.ToString("X4"),
+				["d"] = state.D.ToString("X4"),
+				["pc"] = state.PC.ToString("X4"),
+				["k"] = state.K.ToString("X2"),
+				["dbr"] = state.DBR.ToString("X2"),
+				["flags"] = state.PS.ToString(),
+				["emulationMode"] = state.EmulationMode,
+				["cycleCount"] = (long)state.CycleCount
+			};
 		}
 
 		private static string CmdGetProgramCounter(JsonNode root)
@@ -429,12 +528,7 @@ namespace Mesen.Utilities
 		{
 			CpuType cpuType = ParseCpuType(root["cpuType"]);
 			int count = root["count"]?.GetValue<int>() ?? 1;
-			string? typeStr = root["stepType"]?.GetValue<string>();
-
-			StepType stepType = StepType.Step;
-			if(!string.IsNullOrEmpty(typeStr)) {
-				Enum.TryParse(typeStr, true, out stepType);
-			}
+			StepType stepType = ParseStepType(root["stepType"]);
 
 			DebugApi.Step(cpuType, count, stepType);
 			return Ok(new JsonObject {
@@ -442,6 +536,72 @@ namespace Mesen.Utilities
 				["count"] = count,
 				["stepType"] = stepType.ToString()
 			});
+		}
+
+		/// <summary>
+		/// Step N times and return the CPU state after each step.
+		/// For StepBack, count is the number of back-steps, not the StepBackType.
+		/// Use stepBackUnit to control granularity (Instruction, Scanline, Frame).
+		/// Max 500 steps per call.
+		/// </summary>
+		private static string CmdStepTrace(JsonNode root)
+		{
+			CpuType cpuType = ParseCpuType(root["cpuType"]);
+			int count = root["count"]?.GetValue<int>() ?? 1;
+			StepType stepType = ParseStepType(root["stepType"]);
+
+			if(count < 1) count = 1;
+			if(count > 500) count = 500;
+
+			// For StepBack, stepBackUnit determines granularity.
+			int stepBackUnit = 0; // Instruction
+			if(stepType == StepType.StepBack) {
+				string? unitStr = root["stepBackUnit"]?.GetValue<string>();
+				if(!string.IsNullOrEmpty(unitStr)) {
+					stepBackUnit = unitStr.ToLowerInvariant() switch {
+						"scanline" => 1,
+						"frame" => 2,
+						_ => 0
+					};
+				}
+			}
+
+			var states = new JsonArray();
+			for(int i = 0; i < count; i++) {
+				if(stepType == StepType.StepBack) {
+					DebugApi.Step(cpuType, stepBackUnit, StepType.StepBack);
+				} else {
+					DebugApi.Step(cpuType, 1, stepType);
+				}
+
+				if(cpuType == CpuType.Snes) {
+					var state = DebugApi.GetCpuState<SnesCpuState>(CpuType.Snes);
+					states.Add((JsonNode)BuildSnesCpuStateObject(state));
+				} else {
+					uint pc = DebugApi.GetProgramCounter(cpuType, true);
+					states.Add((JsonNode)new JsonObject {
+						["cpuType"] = cpuType.ToString(),
+						["pc"] = pc.ToString("X6")
+					});
+				}
+			}
+
+			return Ok(new JsonObject {
+				["cpuType"] = cpuType.ToString(),
+				["stepType"] = stepType.ToString(),
+				["count"] = states.Count,
+				["states"] = states
+			});
+		}
+
+		private static StepType ParseStepType(JsonNode? node)
+		{
+			string? typeStr = node?.GetValue<string>();
+			StepType stepType = StepType.Step;
+			if(!string.IsNullOrEmpty(typeStr)) {
+				Enum.TryParse(typeStr, true, out stepType);
+			}
+			return stepType;
 		}
 
 		// ── Disassembly Commands ─────────────────────────────────────────────
@@ -520,7 +680,7 @@ namespace Mesen.Utilities
 					Enabled = enabled
 				};
 				BreakpointManager.AddBreakpoint(bp);
-				BreakpointManager.MarkAsAiSet(bp);
+				BreakpointManager.MarkAsIpcSet(bp);
 			});
 
 			return Ok(new JsonObject {

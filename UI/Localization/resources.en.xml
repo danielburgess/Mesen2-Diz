@@ -1538,6 +1538,9 @@
 			<Control ID="lblRamDumpOverrideTooltip">Override the dump folder for this ROM only. Leave empty to use the default folder.</Control>
 			<Control ID="btnBrowse">Browse...</Control>
 
+			<Control ID="lblIpcSettings">IPC server</Control>
+			<Control ID="chkDisconnectIpcOnRomLoad">Force pipe name change and disconnect when ROM is loaded</Control>
+
 			<Control ID="tabScriptWindow">Script Window</Control>
 			<Control ID="lblScriptStartupBehavior">When a script window is opened: </Control>
 			<Control ID="chkSaveScriptBeforeRun">Auto-save changes before running script</Control>

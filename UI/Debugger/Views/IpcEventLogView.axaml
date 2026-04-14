@@ -17,23 +17,37 @@
 		</Style>
 	</UserControl.Styles>
 
-	<Border BorderThickness="0 1 0 0" BorderBrush="{StaticResource MesenGrayBorderColor}">
-		<ListBox
-			ItemsSource="{Binding Events}"
-			Name="EventList"
-			SelectionMode="Single"
-		>
-			<ListBox.ItemTemplate>
-				<DataTemplate DataType="{x:Type vm:IpcEventEntry}">
-					<StackPanel Orientation="Horizontal" Spacing="8" Margin="2">
-						<TextBlock Text="{Binding TimeDisplay}" Foreground="Gray" Width="80" />
-						<TextBlock Text="{Binding StatusDisplay}" FontWeight="Bold" Width="30"
-							Foreground="{Binding StatusColor}" />
-						<TextBlock Text="{Binding Command}" FontWeight="SemiBold" Width="140" />
-						<TextBlock Text="{Binding ResponsePreview}" Foreground="Gray" TextTrimming="CharacterEllipsis" />
-					</StackPanel>
-				</DataTemplate>
-			</ListBox.ItemTemplate>
-		</ListBox>
-	</Border>
+	<DockPanel>
+		<DockPanel DockPanel.Dock="Bottom" LastChildFill="False">
+			<ToggleButton
+				Name="ScrollLockToggle"
+				DockPanel.Dock="Right"
+				IsChecked="True"
+				Content="Scroll Lock"
+				FontSize="10"
+				Padding="6 2"
+				Margin="4 2"
+				Click="OnScrollLockClick"
+			/>
+		</DockPanel>
+		<Border BorderThickness="0 1 0 0" BorderBrush="{StaticResource MesenGrayBorderColor}">
+			<ListBox
+				ItemsSource="{Binding Events}"
+				Name="EventList"
+				SelectionMode="Single"
+			>
+				<ListBox.ItemTemplate>
+					<DataTemplate DataType="{x:Type vm:IpcEventEntry}">
+						<StackPanel Orientation="Horizontal" Spacing="8" Margin="2">
+							<TextBlock Text="{Binding TimeDisplay}" Foreground="Gray" Width="80" />
+							<TextBlock Text="{Binding StatusDisplay}" FontWeight="Bold" Width="30"
+								Foreground="{Binding StatusColor}" />
+							<TextBlock Text="{Binding Command}" FontWeight="SemiBold" Width="140" />
+							<TextBlock Text="{Binding ResponsePreview}" Foreground="Gray" TextTrimming="CharacterEllipsis" />
+						</StackPanel>
+					</DataTemplate>
+				</ListBox.ItemTemplate>
+			</ListBox>
+		</Border>
+	</DockPanel>
 </UserControl>

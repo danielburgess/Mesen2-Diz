@@ -48,7 +48,7 @@ namespace Mesen.Debugger.ViewModels
 		}
 
 		private Dictionary<string, Func<LabelViewModel, LabelViewModel, int>> _comparers = new() {
-			{ "AiModified", (a, b) => a.IsAiModified.CompareTo(b.IsAiModified) },
+			{ "IpcModified", (a, b) => a.IsIpcModified.CompareTo(b.IsIpcModified) },
 			{ "Category",   (a, b) => a.Label.Category.CompareTo(b.Label.Category) },
 			{ "Label",      (a, b) => string.Compare(a.Label.Label, b.Label.Label, StringComparison.OrdinalIgnoreCase) },
 			{ "RelAddr",    (a, b) => a.RelAddress.CompareTo(b.RelAddress) },
@@ -232,7 +232,7 @@ namespace Mesen.Debugger.ViewModels
 		public string RelAddressDisplay => RelAddress >= 0 ? ("$" + RelAddress.ToString(_format)) : (_isUnmappedType ? "" : "<unavailable>");
 		public object RowBrush => RelAddress >= 0 || _isUnmappedType ? AvaloniaProperty.UnsetValue : Brushes.Gray;
 		public FontStyle RowStyle => RelAddress >= 0 || _isUnmappedType ? FontStyle.Normal : FontStyle.Italic;
-		public bool IsAiModified => LabelManager.IsAiModified(Label.Address, Label.MemoryType);
+		public bool IsIpcModified => LabelManager.IsIpcModified(Label.Address, Label.MemoryType);
 		public IBrush CategoryColor => FunctionCategoryInfo.GetBrush(Label.Category);
 		public string CategoryDisplay => FunctionCategoryInfo.GetDisplay(Label.Category);
 

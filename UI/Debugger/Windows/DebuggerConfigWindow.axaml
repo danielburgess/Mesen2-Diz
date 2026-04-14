@@ -109,6 +109,13 @@
 								Click="OnBrowseRamDumpOverrideFolderClick" />
 						</Grid>
 					</c:OptionSection>
+
+						<c:OptionSection Header="{l:Translate lblIpcSettings}">
+							<CheckBox
+								IsChecked="{Binding IpcConfig.DisconnectOnRomLoad}"
+								Content="{l:Translate chkDisconnectIpcOnRomLoad}"
+							/>
+						</c:OptionSection>
 				</StackPanel>
 			</TabItem>
 			<TabItem>

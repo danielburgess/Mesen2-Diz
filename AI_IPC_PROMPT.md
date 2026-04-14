@@ -34,6 +34,9 @@ All response addresses: uppercase no prefix (`"008000"`).
 ### StepType
 `Step` `StepOut` `StepOver` `PpuFrame` `RunToNmi` `RunToIrq` `StepBack`
 
+### StepBackUnit (for stepTrace with StepBack)
+`Instruction` (default) | `Scanline` | `Frame`
+
 ### CheatType
 `SnesGameGenie` `SnesProActionReplay` `NesGameGenie` `NesProActionRocky` `NesCustom` `GbGameGenie` `GbGameShark` `PceRaw` `PceAddress` `SmsProActionReplay` `SmsGameGenie`
 
@@ -42,13 +45,16 @@ All response addresses: uppercase no prefix (`"008000"`).
 ### Labels
 | Command | Params | Notes |
 |---------|--------|-------|
-| `setLabel` | address, memoryType, label?, comment?, category?, length?(1) | Create/update |
+| `setLabel` | address, memoryType, label?, comment?, category?, length?(1) | Create/update. Returns warning if no category set |
+| `setLabels` | labels:[{address, memoryType, label?, comment?, category?, length?},...] | Batch create/update. Returns count + results array |
 | `deleteLabel` | address, memoryType | |
 | `getLabel` | address, memoryType | Returns null data if not found |
 | `getLabelByName` | name | |
 | `getAllLabels` | cpuType? | Filter by CPU or get all |
 
 Label names: `^[@_a-zA-Z]+[@_a-zA-Z0-9]*$`. Comments support `\n`.
+All labels set via IPC are marked with an IPC flag (visible in label/function list as green dot, sortable).
+**Always set a category** — omitting it triggers a warning in the response.
 
 ### Memory
 | Command | Params | Notes |
@@ -61,6 +67,7 @@ Label names: `^[@_a-zA-Z]+[@_a-zA-Z0-9]*$`. Comments support `\n`.
 | Command | Params | Notes |
 |---------|--------|-------|
 | `getCpuState` | cpuType?(Snes) | SNES: a,x,y,sp,d,pc,k,dbr,flags,emulationMode,cycleCount |
+| `setCpuState` | cpuType?(Snes), a?, x?, y?, sp?, d?, dbr?, k?, pc?, flags?, emulationMode? | Partial update — only provided fields change. Returns full state |
 | `getProgramCounter` | cpuType?(Snes) | |
 | `setProgramCounter` | cpuType?(Snes), address | |
 
@@ -70,7 +77,8 @@ Label names: `^[@_a-zA-Z]+[@_a-zA-Z0-9]*$`. Comments support `\n`.
 | `pause` | | |
 | `resume` | | |
 | `isPaused` | | Returns `{"paused":bool}` |
-| `step` | cpuType?(Snes), count?(1), stepType?(Step) | |
+| `step` | cpuType?(Snes), count?(1), stepType?(Step) | Fire-and-forget. For StepBack: count = StepBackType (0=Instruction,1=Scanline,2=Frame) |
+| `stepTrace` | cpuType?(Snes), count?(1), stepType?(Step), stepBackUnit?(Instruction) | Returns CPU state after **each** step. Max 500. `states` array in response |
 
 ### Disassembly
 | Command | Params | Notes |
@@ -179,6 +187,55 @@ Tap pattern: set → step PpuFrame ×N → clear.
 - Controller input **persists** — always clear when done.
 - `loadRom`/`powerCycle`/`reset` are async — poll `getStatus`.
 - Save state slots: 1-10. File paths: absolute.
+- IPC connection persists across ROM reloads by default. No reconnection needed.
+
+## Debugging Techniques
+
+### Reverse Stepping
+Execution can be **reversed**. The debugger records history and can step backward:
+- `stepType: "StepBack"` with `stepBackUnit: "Instruction"` — undo one instruction
+- `stepType: "StepBack"` with `stepBackUnit: "Scanline"` — rewind one PPU scanline
+- `stepType: "StepBack"` with `stepBackUnit: "Frame"` — rewind one full frame
+
+Use `stepTrace` to step back N times and receive CPU state at each point. This is invaluable for understanding how a value was computed or how execution reached a particular state.
+
+### Forcing Conditions via CPU State
+You can **modify any CPU register, flag, or memory** to force specific execution paths:
+- `setCpuState` — change A, X, Y, SP, D, DBR, K, PC, flags, emulationMode (partial: only fields you provide are changed)
+- `writeMemory` to SnesWorkRam — modify stack contents, variables, or any RAM
+- `setProgramCounter` — jump execution to any address
+- Combine: set registers + flags + PC to simulate any entry condition for a function
+
+Example — force a branch: pause, read flags, set/clear the Zero flag via `setCpuState`, step to observe the alternate path.
+
+Example — test a function: set A/X/Y to desired arguments, set PC to function entry, step through to observe behavior.
+
+### Breakpoint-Driven Analysis
+Breakpoints trigger asynchronously. The emulator pauses when hit, but the IPC response to `addBreakpoint` returns immediately — it does **not** wait for the break to occur.
+
+Workflow:
+1. `addBreakpoint` — set the trap (exec, read, or write; with optional condition expression)
+2. `resume` — let emulation run
+3. **Poll** `isPaused` or `getStatus` periodically to detect when a break occurs
+4. Once paused: `getCpuState`, `getCallstack`, `getDisassembly`, `readMemory` to inspect
+5. `stepTrace` to walk through code instruction by instruction with full state at each step
+6. `resume` to continue, or step further
+
+Conditional breakpoints use the expression evaluator: registers (`A`, `X`, `Y`, `PC`, `SP`), memory reads (`[$7E0100]`), arithmetic, comparisons. Example: `"condition": "A == #$42 && [$7E0010] > #$00"`.
+
+### Execution State Awareness
+- `step` is **fire-and-forget** — it tells the debugger to step, but the step may not complete before the response arrives (the CPU resumes briefly then breaks)
+- `stepTrace` is **synchronous** — it steps and reads CPU state in a tight loop, returning all states in one response. Use this for tracing.
+- After `step`, poll `isPaused` before reading state. After `stepTrace`, states are already in the response.
+- `StepOver` skips subroutine calls (JSR/JSL). `StepOut` runs until the current subroutine returns.
+
+## Annotation Guidelines
+- Follow the user's instructions on what to annotate and how to categorize.
+- **Always annotate the base ROM** — the original, unmodified ROM file. Annotations describe the original game code, not patched/hacked variants.
+- When new discoveries are made (function purpose identified, data table decoded, variable meaning understood), immediately update labels and comments via `setLabel`.
+- Use `category` to classify functions (see FunctionCategory enum). This helps organize the codebase.
+- Add comments explaining **why**, not just what — "Checks if player is underwater" is better than "Compares A to #$03".
+- Label names must match `^[@_a-zA-Z]+[@_a-zA-Z0-9]*$`. Use descriptive names: `Player_CheckCollision`, `LoadTilemap_BG1`, `SFX_PlaySound`.
 
 ## Reverse Engineering Workflow
 1. `getStatus` → confirm ROM loaded
@@ -187,5 +244,8 @@ Tap pattern: set → step PpuFrame ×N → clear.
 4. `getDisassembly` at each function → read code
 5. `setLabel` → name functions, add comments, set category
 6. `readMemory` → examine data tables, RAM
-7. `addBreakpoint` + `step` + `getCpuState` + `getCallstack` → dynamic analysis
-8. `getAbsoluteAddress`/`getRelativeAddress` → address conversion
+7. `addBreakpoint` + `resume` + poll `isPaused` → wait for condition
+8. `stepTrace` → walk through code with full CPU state at each step
+9. `setCpuState` / `writeMemory` → force conditions to test alternate paths
+10. `step` with `StepBack` → reverse execution to understand causality
+11. `getAbsoluteAddress`/`getRelativeAddress` → address conversion

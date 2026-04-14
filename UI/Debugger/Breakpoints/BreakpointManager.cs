@@ -17,12 +17,12 @@ namespace Mesen.Debugger
 
 		/// <summary>
 		/// Session-only set of breakpoints set by the AI companion (via its own tools or IPC).
-		/// Used so the AI only reacts when breakpoints it placed are hit. Not persisted.
+		/// Used so the IPC client only reacts when breakpoints it placed are hit. Not persisted.
 		/// </summary>
-		private static HashSet<Breakpoint> _aiSetBreakpoints = new HashSet<Breakpoint>();
+		private static HashSet<Breakpoint> _ipcSetBreakpoints = new HashSet<Breakpoint>();
 
-		public static void MarkAsAiSet(Breakpoint bp) => _aiSetBreakpoints.Add(bp);
-		public static bool IsAiSet(Breakpoint bp) => _aiSetBreakpoints.Contains(bp);
+		public static void MarkAsIpcSet(Breakpoint bp) => _ipcSetBreakpoints.Add(bp);
+		public static bool IsIpcSet(Breakpoint bp) => _ipcSetBreakpoints.Contains(bp);
 
 		public static ReadOnlyCollection<Breakpoint> Breakpoints
 		{
@@ -63,7 +63,7 @@ namespace Mesen.Debugger
 		public static void ClearBreakpoints()
 		{
 			_breakpoints = new();
-			_aiSetBreakpoints.Clear();
+			_ipcSetBreakpoints.Clear();
 			RefreshBreakpoints();
 		}
 
@@ -78,7 +78,7 @@ namespace Mesen.Debugger
 			if(_breakpoints.Remove(bp)) {
 				DebugWorkspaceManager.AutoSave();
 			}
-			_aiSetBreakpoints.Remove(bp);
+			_ipcSetBreakpoints.Remove(bp);
 			RefreshBreakpoints(bp);
 		}
 
@@ -86,7 +86,7 @@ namespace Mesen.Debugger
 		{
 			foreach(Breakpoint bp in breakpoints) {
 				_breakpoints.Remove(bp);
-				_aiSetBreakpoints.Remove(bp);
+				_ipcSetBreakpoints.Remove(bp);
 			}
 			RefreshBreakpoints(null);
 		}
