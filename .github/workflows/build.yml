@@ -28,7 +28,7 @@ jobs:
           msbuild-architecture: x64
 
       - name: Restore packages
-        run: dotnet restore -p:TargetFramework="net8.0" -r win-x64
+        run: dotnet restore -p:TargetFramework="net8.0" -r win-x64 -p:PublishAot="true"
 
       - name: Write commit SHA1 to file
         uses: ./.github/actions/build-sha1-action
@@ -37,7 +37,7 @@ jobs:
         run: msbuild -nologo -v:d -clp:ForceConsoleColor -m -p:Configuration=Release -p:Platform=x64 -t:Clean,UI -p:TargetFramework="net8.0"
 
       - name: Publish Mesen
-        run: dotnet publish --no-restore -c Release -p:PublishSingleFile="true" -p:OptimizeUi="true" -p:Platform="Any CPU" -p:TargetFramework="net8.0" -r win-x64 Mesen.sln /p:PublishProfile=UI\Properties\PublishProfiles\Release.pubxml
+        run: dotnet publish --no-restore -c Release -p:PublishAot="true" -p:SelfContained="true" -p:PublishSingleFile="false" -p:OptimizeUi="true" -p:Platform="Any CPU" -p:TargetFramework="net8.0" -r win-x64 Mesen.sln /p:PublishProfile=UI\Properties\PublishProfiles\Release.pubxml
 
       - name: Locate published exe
         shell: pwsh
