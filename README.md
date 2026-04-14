@@ -1,6 +1,6 @@
 # Mesen2-Diz
 
-**Mesen2-Diz** is a heavily customized fork of [Mesen2](https://github.com/SourMesen/Mesen2) focused on SNES ROM disassembly, annotation, and reverse-engineering workflows. It integrates [DiztinGUIsh](https://github.com/IsoFrieze/DiztinGUIsh)-compatible project files directly into the emulator debugger, turning Mesen into a full annotation workstation rather than just an emulator.
+**Mesen2-Diz** is a heavily customized fork of [Mesen2](https://github.com/SourMesen/Mesen2) focused on SNES ROM disassembly, annotation, and reverse-engineering workflows. It integrates [DiztinGUIsh](https://github.com/IsoFrieze/DiztinGUIsh)-compatible project files directly into the emulator debugger, giving us full compatability with DistinGuish (SNES-only reverse engineering tool).
 
 > **This is not a general-purpose emulator release.** It is a development tool for SNES reverse-engineering built on top of Mesen2's multi-system emulation core. For standard Mesen2 builds, see the [upstream repository](https://github.com/SourMesen/Mesen2).
 
@@ -11,7 +11,7 @@
 Mesen2-Diz extends Mesen2 with four major capability areas:
 
 1. **DiztinGUIsh project integration** — import/export `.diz` / `.dizraw` annotation projects, round-trip CDL coverage, and export asar-compatible SNES assembly.
-2. **Annotation workflow tools** — visual ROM map, inline label editing, batch find/replace on comments, function/label category system, and provenance flags that mark which labels were set by external tools.
+2. **Annotation workflow tools** — inline label editing, batch find/replace on comments, function/label category system, and provenance flags that mark which labels were set by external tools.
 3. **IPC server for external scripting and AI control** — a line-based JSON pipe server exposing 60+ commands that let external programs (scripts, AI agents, reverse-engineering pipelines) fully drive the emulator and debugger: read/write memory, control execution, set breakpoints, step forward and backward with full CPU state, modify registers, batch-create labels, manage save states, inject controller input, toggle cheats, and more.
 4. **Auto-dump on pause** — optional per-ROM folder where every pause produces a screenshot plus RAM dump, for offline analysis by external tools.
 
@@ -32,35 +32,6 @@ Import and export `.diz` / `.dizraw` DiztinGUIsh project files directly from the
   - Address conversion for all map modes supported by DiztinGUIsh (LoROM, HiROM, ExLoROM, ExHiROM, SA-1)
 
 Access via **Debug → Import DiztinGUIsh Project** and **Debug → Export DiztinGUIsh Project / Export ASM**.
-
----
-
-### Visual ROM Map
-
-A pixel-level visualization of the entire ROM, one pixel per byte, colored by annotation type. Open via **Debug → ROM Map**.
-
-| Color | Byte type |
-|---|---|
-| Blue | Opcode |
-| Light blue | Operand |
-| Orange | Data (8-bit) |
-| Amber | Data (16-bit) |
-| Red-orange | Data (24-bit) |
-| Crimson | Data (32-bit) |
-| Yellow | Pointer (16-bit) |
-| Red | Pointer (24-bit) |
-| Dark red | Pointer (32-bit) |
-| Green | Graphics |
-| Purple | Music |
-| Teal | Text |
-| Near-black | Empty / unreached |
-
-**Settings panel** (toggle with the gear button):
-- **Width (px)**: Set the canvas width in ROM bytes per row.
-- **Fit to window**: Automatically set width to fill the available horizontal space at the current zoom level.
-- **Legend**: Color key for all byte types.
-
-Hovering over the map shows the ROM offset, SNES address, label name (if any), and byte type in the status bar. The map refreshes automatically when a new ROM is loaded and rebuilds when the canvas width changes. If no DiztinGUIsh project is loaded, it falls back to Mesen's live CDL data.
 
 ---
 
