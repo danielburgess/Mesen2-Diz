@@ -1,6 +1,6 @@
 # Mesen2-Diz
 
-**Mesen2-Diz** is a heavily customized fork of [Mesen2](https://github.com/SourMesen/Mesen2) focused on SNES ROM disassembly, annotation, and reverse-engineering workflows. It integrates [DiztinGUIsh](https://github.com/IsoFrieze/DiztinGUIsh)-compatible project files directly into the emulator debugger, giving us full compatability with DistinGuish (SNES-only reverse engineering tool).
+**Mesen2-Diz** is a heavily customized fork of [Mesen2](https://github.com/SourMesen/Mesen2) focused on SNES ROM disassembly, annotation, and reverse-engineering workflows. It integrates [DiztinGUIsh](https://github.com/IsoFrieze/DiztinGUIsh)-compatible project files directly into the emulator debugger.
 
 > **This is not a general-purpose emulator release.** It is a development tool for SNES reverse-engineering built on top of Mesen2's multi-system emulation core. For standard Mesen2 builds, see the [upstream repository](https://github.com/SourMesen/Mesen2).
 
