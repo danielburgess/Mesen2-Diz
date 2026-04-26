@@ -12,8 +12,10 @@ Mesen2-Diz extends Mesen2 with four major capability areas:
 
 1. **DiztinGUIsh project integration** — import/export `.diz` / `.dizraw` annotation projects, round-trip CDL coverage, and export asar-compatible SNES assembly.
 2. **Annotation workflow tools** — inline label editing, batch find/replace on comments, function/label category system, and provenance flags that mark which labels were set by external tools.
-3. **IPC server for external scripting and AI control** — a line-based JSON pipe server exposing 60+ commands that let external programs (scripts, AI agents, reverse-engineering pipelines) fully drive the emulator and debugger: read/write memory, control execution, set breakpoints, step forward and backward with full CPU state, modify registers, batch-create labels, manage save states, inject controller input, toggle cheats, and more.
+3. **IPC server for external scripting and AI control** — a line-based JSON pipe server exposing 85+ commands that let external programs (scripts, AI agents, reverse-engineering pipelines) fully drive the emulator and debugger. Beyond the basics (memory r/w, execution control, breakpoints, label/save-state/cheat management) the protocol now covers full **SNES + SPC700 + S-DSP** state, PPU/DMA introspection, tilemap and tile-graphics decoding, targeted execution (run-until-VRAM-write), memory search / snapshot / diff, trace log + event wait, and a lock-free **MMIO memory-watch hook** for high-throughput access tracing.
 4. **Auto-dump on pause** — optional per-ROM folder where every pause produces a screenshot plus RAM dump, for offline analysis by external tools.
+
+A companion **Claude Code skill** (`snes-reverse-engineering`) is in active development to layer 65816/SPC700 RE methodology, recipes, and a 263-section hardware knowledge base on top of this IPC. The skill drives the emulator through the same protocol documented in [`AI_IPC_PROMPT.md`](AI_IPC_PROMPT.md); the emulator is the runtime, the skill is the brain. It will be released separately when ready.
 
 ## Added Features
 
@@ -72,14 +74,14 @@ Configure under **Settings → Debugger → IPC Server**. The pipe name defaults
 
 **Protocol**: one `{"command":"X",...}\n` per request, one `{"success":bool,"data":...}\n` per response. Connections persist across ROM reloads.
 
-**Command categories (60+ total)**:
+**Command categories (85+ total)**:
 
 | Category | Commands |
 |---|---|
 | Labels | `setLabel`, `setLabels` (batch), `deleteLabel`, `getLabel`, `getLabelByName`, `getAllLabels` |
 | Memory | `readMemory`, `writeMemory`, `getMemorySize` |
-| CPU state | `getCpuState`, `setCpuState` (partial-update), `getProgramCounter`, `setProgramCounter` |
-| Execution | `pause`, `resume`, `isPaused`, `step`, `stepTrace` (synchronous multi-step with per-step CPU state) |
+| CPU state | `getCpuState` (full SNES + SPC), `setCpuState` (partial-update, SNES + SPC), `getProgramCounter`, `setProgramCounter` |
+| Execution | `pause`, `resume`, `isPaused`, `step`, `stepTrace` (synchronous multi-step with per-step CPU state; supports `StepBack` rewinds) |
 | Disassembly | `getDisassembly`, `searchDisassembly` |
 | Breakpoints | `addBreakpoint` (exec/read/write + conditions), `removeBreakpoint`, `getBreakpoints`, `clearBreakpoints` |
 | Expressions | `evaluate` (registers, memory reads, arithmetic) |
@@ -92,8 +94,16 @@ Configure under **Settings → Debugger → IPC Server**. The pipe name defaults
 | Save states | `saveStateSlot`, `loadStateSlot`, `saveStateFile`, `loadStateFile` |
 | Controller input | `setControllerInput`, `clearControllerInput` |
 | Emulation settings | `getEmulationSpeed`, `setEmulationSpeed`, `getTurboSpeed`, `setTurboSpeed`, `getRunAheadFrames`, `setRunAheadFrames`, `getConfig` |
-| Timing/PPU | `getTimingInfo`, `getPpuState` |
+| Timing & PPU | `getTimingInfo`, `getPpuState`, `getBgState`, `getDmaState` |
+| PPU memory | `getVram`, `getCgram`, `getOam` (raw bytes + parsed sprites) |
+| Tilemap / graphics decode | `getTilemap` (handles double-width/height quadrants), `decodeTiles` (2/4/8bpp planar → indexed + RGBA), `renderBgLayer` (full BG composite) |
+| Targeted execution | `runUntilVramWrite` |
+| Memory search & diff | `searchMemory` (hex + wildcards), `snapshotMemory`, `diffMemory`, `clearSnapshots` |
+| Trace log & event wait | `getTraceLog`, `setTraceLogEnabled`, `waitForEvent` (breakpoint/paused/resumed/frameComplete/romLoaded/stateLoaded/reset) |
+| SPC700 / S-DSP | `getSpcState`, `getDspState` (decoded per-voice + global registers) |
+| MMIO memory watch hook | `watchCpuMemory`, `addCpuMemoryWatch`, `clearCpuMemoryWatches`, `pollMemoryEvents`, `setMemoryWatchEnabled`, `setMemoryWatchRingSize` |
 | Cheats | `setCheats`, `clearCheats` |
+| Introspection | `listCommands` (alias `getCommands`) |
 
 **Reverse stepping**: `stepTrace` with `stepType: "StepBack"` rewinds execution by instruction, scanline, or frame, returning full CPU state at each point — the debugger records history so external agents can analyze causality.
 
@@ -104,6 +114,47 @@ Configure under **Settings → Debugger → IPC Server**. The pipe name defaults
 **AI agent usage**: the file [`AI_IPC_PROMPT.md`](AI_IPC_PROMPT.md) is a compact, machine-readable spec of the entire IPC protocol, intended to be fed directly to an LLM as a system prompt. External AI companions (e.g. running in Claude Code, Cursor, or a custom agent) can read this file and immediately drive the emulator for disassembly, annotation, debugging assistance, and translation work. The built-in AI chat was removed in favor of this external-agent model — one IPC surface, any front-end.
 
 **Copy prompt button**: **Settings → Debugger → IPC Server → Copy AI Prompt** copies the full spec to the clipboard for pasting into an AI tool.
+
+---
+
+### SPC700 / S-DSP audio reverse-engineering
+
+The IPC protocol now treats the SPC700 audio CPU as a first-class debug target alongside the main 65816. This makes sound-driver RE — which historically required SPC dumps and offline disassembly — a live, scriptable workflow.
+
+- `getCpuState cpuType=Spc` (alias `getSpcState`) returns the full SPC register file: A, X, Y, SP, PC, flags (`SpcFlags`), cycle, dspReg, the four APU mailbox bytes from both sides ($F4-$F7 / $2140-$2143), and per-timer outputs.
+- `setCpuState cpuType=Spc` writes back any subset — useful for forcing the SPC into a specific entry condition.
+- `stepTrace cpuType=Spc` returns full SPC state per step (synchronous multi-step), and `step cpuType=Spc` supports `StepBack` for reverse-stepping the audio CPU independently of the main 65816.
+- `getDspState` snapshots all 128 S-DSP registers plus a decoded view of the eight voices (vol L/R, pitch, SRCN, ADSR1/2, GAIN, ENVX, OUTX, key-on/off, voice-end, PMON/NON/EON) and global state (master vol, echo vol/feedback/delay, FLG bits, sample directory, echo buffer start).
+- Memory types `SpcMemory` (logical SPC view including IPL ROM overlay), `SpcRam` (raw 64 KiB ARAM), `SpcRom` (64-byte IPL), and `SpcDspRegisters` are all readable/writable via `readMemory`/`writeMemory`. Breakpoints on SPC code or APU mailbox ports use `memoryType=SpcMemory`.
+
+[`AI_IPC_PROMPT.md`](AI_IPC_PROMPT.md) ships with a "Tracing Audio Subsystems" playbook covering the $2140-$2143 / $F4-$F7 port bridge, a six-step canonical RE flow (capture command stream → break on SPC receiver → walk the dispatcher → snapshot DSP across KON → identify the note table → label as you go), 12 gotchas (latched DSP writes, KON pulse, sticky ENDX, IPL overlay toggling, port OR-race, timer-clear-on-read, PowerCycle wipes SPC, etc.), and ready-to-paste JSON snippets.
+
+---
+
+### MMIO memory watch hook (lock-free SPSC ring)
+
+For "watch every CPU access in this address range for a few frames," breakpoints are too slow — they pause execution. The MMIO watch hook captures matching memory accesses in a native single-producer/single-consumer ring buffer that the IPC client drains via `pollMemoryEvents`.
+
+- Per-CpuType range filters with optional `valueMin`/`valueMax` and `sampleRate=1-in-N` to cut noise on hot ports (e.g. PPU registers).
+- Op masks: `read`, `write`, `exec`, `execoperand`, `dmaread`, `dmawrite`, plus `allaccess` / `all` shortcuts. Value is pre-commit for writes.
+- Drop-newest overflow with `dropped` and `highWater` counters surfaced in every poll response, so clients can detect saturation and adapt.
+- Hot path is **fully bypassed** when `setMemoryWatchEnabled false` — zero cost when no client is listening.
+- Ring size is configurable (`setMemoryWatchRingSize`, persisted to config; power-of-two, 1024-4194304).
+
+This is the right tool for "what does the game do during the first vblank after pressing Start," "which writes touch this MMIO register and what value sequence," or "watch all main-CPU writes to $2140-$2143 to capture the audio command stream" — all without ever pausing the emulator.
+
+---
+
+### Companion: `snes-reverse-engineering` Claude Code skill
+
+A separate **Claude Code skill** (`snes-reverse-engineering`) is in active development as the "brain" half of this stack — Mesen2-Diz is the runtime; the skill is the methodology and reference layer that drives it.
+
+- 65816 + SPC700 cheatsheets, address-conversion scripts (LoROM/HiROM/ExHiROM/SA-1, copier-header aware), and a 263-section structured hardware knowledge base (queryable section-by-section to keep context windows lean).
+- Investigative recipes for "what code writes to VRAM $X," "identify main loop and NMI handler," "decode a compressed data table," "force a branch to observe the alternate path," "trace the audio driver when track N plays," and more.
+- Pre-flight ritual + state-verification helpers wrapped in a Python `MesenClient` IPC client (named-pipe, line-delimited JSON, context-manager cleanup).
+- Annotation discipline guidance, error recovery tables, and a "when to stop and ask the user" framework so the agent doesn't grind on ambiguous specs.
+
+The skill talks to Mesen2-Diz exclusively through the IPC protocol documented in [`AI_IPC_PROMPT.md`](AI_IPC_PROMPT.md), so any improvements to either side compose cleanly. The skill will be released separately when ready.
 
 ---
 
