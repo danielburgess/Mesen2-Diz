@@ -36,6 +36,9 @@ class IDebugger;
 class ITraceLogger;
 class TraceLogFileSaver;
 class FrozenAddressManager;
+class IpcMemoryWatcher;
+struct IpcMemEvent;
+struct IpcWatchRange;
 
 struct TraceRow;
 struct BaseState;
@@ -74,6 +77,7 @@ private:
 	unique_ptr<CdlManager> _cdlManager;
 
 	unique_ptr<TraceLogFileSaver> _traceLogSaver;
+	unique_ptr<IpcMemoryWatcher> _ipcMemWatcher;
 
 	SimpleLock _logLock;
 	std::list<string> _debuggerLog;
@@ -192,6 +196,7 @@ public:
 	LabelManager* GetLabelManager() { return _labelManager.get(); }
 	CdlManager* GetCdlManager() { return _cdlManager.get(); }
 	ScriptManager* GetScriptManager() { return _scriptManager.get(); }
+	IpcMemoryWatcher* GetIpcMemoryWatcher() { return _ipcMemWatcher.get(); }
 	IConsole* GetConsole() { return _console; }
 	Emulator* GetEmulator() { return _emu; }
 

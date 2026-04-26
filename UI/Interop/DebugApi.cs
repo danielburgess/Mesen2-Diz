@@ -224,6 +224,12 @@ namespace Mesen.Interop
 		[DllImport(DllPath)] public static extern void ClearLabels();
 
 		[DllImport(DllPath)] public static extern void SetBreakpoints([MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] InteropBreakpoint[] breakpoints, UInt32 length);
+
+		[DllImport(DllPath)] public static extern void SetIpcMemoryWatches(CpuType cpuType, [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2)] IpcWatchRange[] ranges, UInt32 count);
+		[DllImport(DllPath)] public static extern void ClearIpcMemoryWatches();
+		[DllImport(DllPath)] public static extern void SetIpcMemoryWatchEnabled([MarshalAs(UnmanagedType.I1)] bool enabled);
+		[DllImport(DllPath)] public static extern void SetIpcMemoryRingSize(UInt32 size);
+		[DllImport(DllPath)] public static extern UInt32 PollIpcMemoryEvents([In, Out] IpcMemEvent[] outBuffer, UInt32 maxEvents, out UInt64 droppedOut, out UInt64 highWaterOut);
 		
 		[DllImport(DllPath)] public static extern void SetInputOverrides(UInt32 index, DebugControllerState state);
 		[DllImport(DllPath)] private static extern void GetAvailableInputOverrides([In, Out] byte[] availableIndexes);
@@ -1698,6 +1704,45 @@ namespace Mesen.Interop
 		[MarshalAs(UnmanagedType.I1)] public bool MatchWholeWord;
 		[MarshalAs(UnmanagedType.I1)] public bool SearchBackwards;
 		[MarshalAs(UnmanagedType.I1)] public bool SkipFirstLine;
+	}
+
+	[StructLayout(LayoutKind.Sequential, Pack = 1)]
+	public struct IpcWatchRange
+	{
+		public UInt32 Start;
+		public UInt32 End;
+		public UInt32 OpMask;
+		public UInt16 ValueMin;
+		public UInt16 ValueMax;
+		public UInt32 SampleRate;
+		public UInt32 SampleCounter;
+	}
+
+	[StructLayout(LayoutKind.Sequential, Pack = 1)]
+	public struct IpcMemEvent
+	{
+		public UInt64 MasterClock;
+		public UInt32 Address;
+		public UInt32 AbsAddress;
+		public UInt16 Value;
+		public byte CpuType;
+		public byte MemType;
+		public byte OpType;
+		public byte AccessWidth;
+		public byte Pad0;
+		public byte Pad1;
+	}
+
+	public static class IpcWatchOpMaskBits
+	{
+		public const UInt32 Read = 1u << 0;
+		public const UInt32 Write = 1u << 1;
+		public const UInt32 ExecOpCode = 1u << 2;
+		public const UInt32 ExecOperand = 1u << 3;
+		public const UInt32 DmaRead = 1u << 4;
+		public const UInt32 DmaWrite = 1u << 5;
+		public const UInt32 AllAccess = Read | Write | DmaRead | DmaWrite;
+		public const UInt32 AllWithExec = AllAccess | ExecOpCode | ExecOperand;
 	}
 
 	public struct DebugControllerState

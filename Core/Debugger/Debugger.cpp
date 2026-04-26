@@ -12,6 +12,7 @@
 #include "Debugger/DebugBreakHelper.h"
 #include "Debugger/LabelManager.h"
 #include "Debugger/ScriptManager.h"
+#include "Debugger/IpcMemoryWatcher.h"
 #include "Debugger/ScriptHost.h"
 #include "Debugger/CallstackManager.h"
 #include "Debugger/ExpressionEvaluator.h"
@@ -81,6 +82,7 @@ Debugger::Debugger(Emulator* emu, IConsole* console)
 	_memoryAccessCounter.reset(new MemoryAccessCounter(this));
 	_scriptManager.reset(new ScriptManager(this));
 	_traceLogSaver.reset(new TraceLogFileSaver());
+	_ipcMemWatcher.reset(new IpcMemoryWatcher());
 	_cdlManager.reset(new CdlManager(this, _disassembler.get()));
 
 	//Use cpuTypes for iteration (ordered), not _cpuTypes (order is important for coprocessors, etc.)
@@ -279,6 +281,19 @@ void Debugger::ProcessMemoryRead(uint32_t addr, T& value, MemoryOperationType op
 	if(_scriptManager->HasCpuMemoryCallbacks()) {
 		ProcessScripts<type>(addr, value, opType);
 	}
+
+	if(_ipcMemWatcher->ShouldCapture(type, addr, (uint32_t)value, opType)) {
+		IpcMemEvent ev = {};
+		ev.MasterClock = _emu->GetMasterClock();
+		ev.Address = addr;
+		ev.AbsAddress = UINT32_MAX;
+		ev.Value = (uint16_t)value;
+		ev.CpuTypeVal = (uint8_t)type;
+		ev.MemType = 0xFF;
+		ev.OpType = (uint8_t)opType;
+		ev.AccessWidth = accessWidth;
+		_ipcMemWatcher->Push(ev);
+	}
 }
 
 template<CpuType type, uint8_t accessWidth, MemoryAccessFlags flags, typename T>
@@ -312,7 +327,20 @@ bool Debugger::ProcessMemoryWrite(uint32_t addr, T& value, MemoryOperationType o
 	if(_scriptManager->HasCpuMemoryCallbacks()) {
 		ProcessScripts<type>(addr, value, opType);
 	}
-	
+
+	if(_ipcMemWatcher->ShouldCapture(type, addr, (uint32_t)value, opType)) {
+		IpcMemEvent ev = {};
+		ev.MasterClock = _emu->GetMasterClock();
+		ev.Address = addr;
+		ev.AbsAddress = UINT32_MAX;
+		ev.Value = (uint16_t)value;
+		ev.CpuTypeVal = (uint8_t)type;
+		ev.MemType = 0xFF;
+		ev.OpType = (uint8_t)opType;
+		ev.AccessWidth = accessWidth;
+		_ipcMemWatcher->Push(ev);
+	}
+
 	return !_debuggers[(int)type].Debugger->GetFrozenAddressManager().IsFrozenAddress(addr);
 }
 

@@ -16,6 +16,7 @@
 #include "Core/Debugger/CallstackManager.h"
 #include "Core/Debugger/LabelManager.h"
 #include "Core/Debugger/ScriptManager.h"
+#include "Core/Debugger/IpcMemoryWatcher.h"
 #include "Core/Debugger/Profiler.h"
 #include "Core/Debugger/IAssembler.h"
 #include "Core/Debugger/BaseEventManager.h"
@@ -86,6 +87,36 @@ extern "C"
 	DllExport void __stdcall StopLogTraceToFile() { WithDebugger(void, GetTraceLogFileSaver()->StopLogging()); }
 
 	DllExport void __stdcall SetBreakpoints(Breakpoint breakpoints[], uint32_t length) { WithDebugger(void, SetBreakpoints(breakpoints, length)); }
+
+	DllExport void __stdcall SetIpcMemoryWatches(CpuType cpuType, IpcWatchRange ranges[], uint32_t count)
+	{
+		WithDebugger(void, GetIpcMemoryWatcher()->SetWatches(cpuType, ranges, (size_t)count));
+	}
+
+	DllExport void __stdcall ClearIpcMemoryWatches()
+	{
+		WithDebugger(void, GetIpcMemoryWatcher()->ClearAllWatches());
+	}
+
+	DllExport void __stdcall SetIpcMemoryWatchEnabled(bool enabled)
+	{
+		WithDebugger(void, GetIpcMemoryWatcher()->SetEnabled(enabled));
+	}
+
+	DllExport void __stdcall SetIpcMemoryRingSize(uint32_t size)
+	{
+		WithDebugger(void, GetIpcMemoryWatcher()->SetRingSize((size_t)size));
+	}
+
+	DllExport uint32_t __stdcall PollIpcMemoryEvents(IpcMemEvent outBuffer[], uint32_t maxEvents, uint64_t* droppedOut, uint64_t* highWaterOut)
+	{
+		uint64_t dropped = 0;
+		uint64_t highWater = 0;
+		uint32_t result = WithDebugger(uint32_t, GetIpcMemoryWatcher()->Drain(outBuffer, (size_t)maxEvents, dropped, highWater));
+		if(droppedOut) *droppedOut = dropped;
+		if(highWaterOut) *highWaterOut = highWater;
+		return result;
+	}
 	
 	DllExport void __stdcall SetInputOverrides(uint32_t index, DebugControllerState state) { WithDebugger(void, SetInputOverrides(index, state)); }
 	DllExport void __stdcall GetAvailableInputOverrides(uint8_t* availableIndexes) { WithDebugger(void, GetAvailableInputOverrides(availableIndexes)); }

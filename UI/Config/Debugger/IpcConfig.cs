@@ -20,5 +20,12 @@ namespace Mesen.Config
 		/// When false (default), the server keeps the existing pipe open.
 		/// </summary>
 		[Reactive] public bool DisconnectOnRomLoad { get; set; } = false;
+
+		/// <summary>
+		/// SPSC ring buffer size for the native MMIO callback hook (events).
+		/// Must be a power of two. Rounded up if not, clamped to [1024, 4194304].
+		/// Bigger = tolerates larger poll-cadence gaps without dropping events.
+		/// </summary>
+		[Reactive] public uint MemoryWatchRingSize { get; set; } = 65536;
 	}
 }
