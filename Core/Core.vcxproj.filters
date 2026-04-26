@@ -166,6 +166,12 @@
     <ClInclude Include="Debugger\TraceLogFileSaver.h">
       <Filter>Debugger</Filter>
     </ClInclude>
+    <ClCompile Include="Debugger\IpcMemoryWatcher.cpp">
+      <Filter>Debugger</Filter>
+    </ClCompile>
+    <ClInclude Include="Debugger\IpcMemoryWatcher.h">
+      <Filter>Debugger</Filter>
+    </ClInclude>
     <ClCompile Include="Gameboy\Gameboy.cpp">
       <Filter>Gameboy</Filter>
     </ClCompile>

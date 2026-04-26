@@ -744,6 +744,7 @@
     <ClInclude Include="Debugger\ScriptHost.h" />
     <ClInclude Include="Debugger\ScriptingContext.h" />
     <ClInclude Include="Debugger\ScriptManager.h" />
+    <ClInclude Include="Debugger\IpcMemoryWatcher.h" />
     <ClInclude Include="SNES\Coprocessors\SDD1\Sdd1.h" />
     <ClInclude Include="SNES\Coprocessors\SDD1\Sdd1Decomp.h" />
     <ClInclude Include="SNES\Coprocessors\SDD1\Sdd1Mmc.h" />
@@ -1067,6 +1068,7 @@
     <ClCompile Include="Debugger\ScriptHost.cpp" />
     <ClCompile Include="Debugger\ScriptingContext.cpp" />
     <ClCompile Include="Debugger\ScriptManager.cpp" />
+    <ClCompile Include="Debugger\IpcMemoryWatcher.cpp" />
     <ClCompile Include="SNES\Coprocessors\SDD1\Sdd1.cpp" />
     <ClCompile Include="SNES\Coprocessors\SDD1\Sdd1Decomp.cpp" />
     <ClCompile Include="SNES\Coprocessors\SDD1\Sdd1Mmc.cpp" />
