@@ -332,7 +332,7 @@ namespace Mesen.Windows
 							}
 
 							if(ConfigManager.Config.Debug.Debugger.OpenOnGameLoad) {
-								DebuggerWindow.GetOrOpenWindow(romInfo.ConsoleType.GetMainCpuType());
+								DebuggerWindow.GetOrOpenWindow(romInfo.ConsoleType.GetMainCpuType(), bringToFrontIfExists: false);
 							}
 
 							DispatcherTimer.RunOnce(() => {

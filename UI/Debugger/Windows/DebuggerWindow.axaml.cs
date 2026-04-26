@@ -70,12 +70,12 @@ namespace Mesen.Debugger.Windows
 			_model.ScrollToAddress((int)address);
 		}
 
-		public static DebuggerWindow GetOrOpenWindow(CpuType cpuType)
+		public static DebuggerWindow GetOrOpenWindow(CpuType cpuType, bool bringToFrontIfExists = true)
 		{
 			DebuggerWindow? wnd = DebugWindowManager.GetDebugWindow<DebuggerWindow>(x => x.CpuType == cpuType);
 			if(wnd == null) {
 				return DebugWindowManager.OpenDebugWindow<DebuggerWindow>(() => new DebuggerWindow(cpuType));
-			} else {
+			} else if(bringToFrontIfExists) {
 				wnd.BringToFront();
 			}
 			return wnd;
